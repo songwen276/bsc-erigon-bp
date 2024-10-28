@@ -148,6 +148,7 @@ func loadBaseConfig(ctx *cli.Context) gethConfig {
 			utils.Fatalf("%v", err)
 		}
 	}
+	log.Info("PairConfig", "PairConfig", cfg.Pair)
 
 	scheme := cfg.Eth.StateScheme
 	if scheme != "" {
