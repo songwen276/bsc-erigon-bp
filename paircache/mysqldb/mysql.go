@@ -2,7 +2,6 @@ package mysqldb
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/jmoiron/sqlx"
 	"sync"
 	"time"
@@ -23,7 +22,6 @@ var (
 
 // InitDB 初始化数据库连接
 func InitDB() {
-	fmt.Println("init db", "User", User, "Password", Password, "Hostname", Hostname, "Dbname", Dbname, "MaxOpenConns", MaxOpenConns, "MaxIdleConns", MaxIdleConns)
 	once.Do(func() {
 		// 构建 DSN (Data Source Name)
 		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true", User, Password, Hostname, Dbname)
@@ -32,7 +30,7 @@ func InitDB() {
 		var err error
 		mysqldb, err = sqlx.Open("mysql", dsn)
 		if err != nil {
-			log.Error("Error opening database", err)
+			fmt.Println("Error opening database", err)
 		}
 
 		// 配置连接池
@@ -42,7 +40,7 @@ func InitDB() {
 
 		// 验证连接
 		if err = mysqldb.Ping(); err != nil {
-			log.Error("Error pinging database", err)
+			fmt.Println("Error pinging database", err)
 		}
 	})
 }
@@ -50,7 +48,7 @@ func InitDB() {
 // GetDB 返回数据库连接池对象
 func GetMysqlDB() *sqlx.DB {
 	if mysqldb == nil {
-		log.Error("Database not initialized. Call InitDB first.")
+		fmt.Println("Database not initialized. Call InitDB first.")
 	}
 	return mysqldb
 }
