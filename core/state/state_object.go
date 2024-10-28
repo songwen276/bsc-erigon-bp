@@ -203,9 +203,65 @@ func (s *stateObject) setOriginStorage(key common.Hash, value common.Hash) {
 	s.originStorage[key] = value
 }
 
-// var storCacheMap = make(map[string]common.Hash, 2000000)
+var storageCacheMap = NewStorageCacheMap()
 
-// var storAddTmpMap = cmap.New()
+type storageCache struct {
+	lock     sync.RWMutex
+	cacheMap map[common.Address]map[common.Hash]common.Hash
+}
+
+// NewStorageCacheMap 初始化一个空的 storageCacheMap
+func NewStorageCacheMap() *storageCache {
+	return &storageCache{
+		cacheMap: make(map[common.Address]map[common.Hash]common.Hash),
+	}
+}
+
+// Get 获取指定地址和槽位的值
+func (s *storageCache) Get(addr common.Address, slot common.Hash) (common.Hash, bool) {
+	s.lock.RLock()         // 加读锁
+	defer s.lock.RUnlock() // 函数结束释放读锁
+
+	if slotMap, exists := s.cacheMap[addr]; exists {
+		value, found := slotMap[slot]
+		return value, found
+	}
+	return common.Hash{}, false
+}
+
+// Set 设置指定地址和槽位的值
+func (s *storageCache) Set(addr common.Address, slot common.Hash, value common.Hash) {
+	s.lock.Lock()         // 加写锁
+	defer s.lock.Unlock() // 函数结束释放写锁
+
+	// 如果地址不存在，则创建新的槽位映射
+	if _, exists := s.cacheMap[addr]; !exists {
+		s.cacheMap[addr] = make(map[common.Hash]common.Hash)
+	}
+	s.cacheMap[addr][slot] = value
+}
+
+// Delete 删除指定地址和槽位的值
+func (s *storageCache) Delete(addr common.Address, slot common.Hash) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if slotMap, exists := s.cacheMap[addr]; exists {
+		delete(slotMap, slot)
+		if len(slotMap) == 0 { // 如果地址的槽位为空，删除地址映射
+			delete(s.cacheMap, addr)
+		}
+	}
+}
+
+// Delete 删除指定地址的所有槽位
+func (s *storageCache) DeleteAll(addr common.Address) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// 删除整个地址映射，清除该地址下的所有槽位
+	delete(s.cacheMap, addr)
+}
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
@@ -218,21 +274,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		return value
 	}
 
-	// storageCacheMap := pair.GetStorageCacheMap()
-	// hashedKey := crypto.Keccak256Hash(s.addrHash[:], key[:]).Hex()
-	// if s.db.Flag == 1 {
-	// 	if storageCache, exists := storageCacheMap.Get(hashedKey); exists {
-	// 		storage := storageCache.(common.Hash)
-	// 		s.setOriginStorage(key, storage)
-	// 		return storage
-	// 	}
-	//
-	// 	// if storage, ok := storCacheMap[hashedKey]; ok {
-	// 	// 	s.setOriginStorage(key, storage)
-	// 	// 	return storage
-	// 	// }
-	// }
-
 	// If the object was destructed in *this* block (and potentially resurrected),
 	// the storage has been cleared out, and we should *not* consult the previous
 	// database about any storage values. The only possible alternatives are:
@@ -242,12 +283,21 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
 		return common.Hash{}
 	}
+
+	if s.db.Flag == 1 {
+		if storage, exists := storageCacheMap.Get(s.address, key); exists {
+			s.setOriginStorage(key, storage)
+			return storage
+		}
+	}
+
 	// If no live objects are available, attempt to use snapshots
 	var (
 		enc   []byte
 		err   error
 		value common.Hash
 	)
+
 	if s.db.snap != nil {
 		start := time.Now()
 		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
@@ -262,6 +312,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			value.SetBytes(content)
 		}
 	}
+
 	// If the snapshot is unavailable or reading from it fails, load from the database.
 	if s.db.snap == nil || err != nil {
 		start := time.Now()
@@ -282,10 +333,9 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 	s.setOriginStorage(key, value)
 
-	// if s.db.Flag == 1 {
-	// 	storageCacheMap.Set(hashedKey, value)
-	// 	// storAddTmpMap.Set(hashedKey, value)
-	// }
+	if s.db.Flag == 1 {
+		storageCacheMap.Set(s.address, key, value)
+	}
 
 	return value
 }

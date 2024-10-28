@@ -2,7 +2,6 @@ package paircache
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
@@ -10,71 +9,123 @@ import (
 	"github.com/ethereum/go-ethereum/paircache/mysqldb"
 	"github.com/ethereum/go-ethereum/paircache/pairtypes"
 	"github.com/jmoiron/sqlx"
-	"github.com/orcaman/concurrent-map"
+	"io"
+	"math/rand"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-var stateObjectCacheMap = cmap.New()
+var (
+	TriangleChannel   = make(chan *pairtypes.TransferTriangle)
+	DoneChannel       = make(chan struct{})
+	pairCache         = pairtypes.NewPairCache()
+	ABI               *abi.ABI
+	AbiStr            string
+	From              common.Address
+	To                common.Address
+	ToStr             string
+	ClusterId         int64
+	ClusterTotal      int64
+	ConfigItemUrl     string
+	ChainId           int64
+	Type              string
+	MevServiceUrl     string
+	TrianglefilterNum int
+	PairCallTimeout   int
+	PairCallDeadline  int64
+	PairCallSwitch    bool
+	ProfitThreshold   int64
+)
 
-var storageCacheMap = cmap.New()
+// 处理通道中的数据
+func ProcessTriangle(pairAPI pairtypes.PairAPI) {
+	for {
+		select {
+		case transferTriangle := <-TriangleChannel:
+			if deadline := IsOutPairCallDeadline(transferTriangle.BlockTime, "去重随机获取triangles个数="+strconv.Itoa(len(transferTriangle.Triangles))); !deadline {
+				pairAPI.PairCallBatch(transferTriangle)
+				// 处理完成通知
+				// paircache.DoneChannel <- struct{}{}
+			}
+		}
+	}
+}
 
-var pairCache = pairtypes.NewPairCache()
-
-var abiStr = "[{\"inputs\":[],\"name\":\"arb_wcnwzblucpyf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"components\":[{\"internalType\":\"address\",\"name\":\"token0\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"router0\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"pair0\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"token1\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"router1\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"pair1\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"token2\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"router2\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"pair2\",\"type\":\"address\"}],\"internalType\":\"structITriangularArbitrage.Triangular\",\"name\":\"t\",\"type\":\"tuple\"},{\"internalType\":\"uint256\",\"name\":\"startRatio\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"endRatio\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"pieces\",\"type\":\"uint256\"}],\"name\":\"arbitrageQuery\",\"outputs\":[{\"internalType\":\"int256[]\",\"name\":\"roi\",\"type\":\"int256[]\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"components\":[{\"internalType\":\"address\",\"name\":\"token0\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"router0\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"pair0\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"token1\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"router1\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"pair1\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"token2\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"router2\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"pair2\",\"type\":\"address\"}],\"internalType\":\"structITriangularArbitrage.Triangular\",\"name\":\"t\",\"type\":\"tuple\"},{\"internalType\":\"uint256\",\"name\":\"threshold\",\"type\":\"uint256\"}],\"name\":\"isTriangularValid\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]"
-
-var ABI *abi.ABI
-
-var From = common.HexToAddress("0xcdecF7Ab7c6654139F65c6C1C7Ecbad653F0dfB0")
-
-var To = common.HexToAddress("0x84F7f6016e5ED7819f717994225D4f60c7Af5359")
-
-func init() {
+func InitPairCache() {
 	// 初始化triange到内存
 	triangleStart := time.Now()
 	fetchTriangleMap()
-	fmt.Printf("初次加载triange到内存中耗时：%v，共加载%v条，加载pair共%v条\n", time.Since(triangleStart), pairCache.TriangleMapSize(), pairCache.PairTriangleMapSize())
+	log.Info("初次加载triange到内存中成功", "耗时", time.Since(triangleStart), "triange总数", pairCache.TriangleMapSize(), "解析pair总数", pairCache.PairTriangleIdSetMapSize())
 
 	// 初始化topic到内存
-	topicStart := time.Now()
-	fetchTopicMap()
-	fmt.Printf("初次加载topic到内存中耗时：%v，共加载%v条\n", time.Since(topicStart), len(pairCache.TopicMap))
+	configStart := time.Now()
+	fetchDynamicConfig()
+	log.Info("初次加载动态配置成功到内存中成功", "耗时", time.Since(configStart))
 
 	// 开启协程周期更新内存中triange与topic
 	err := gopool.Submit(timerGetTriangle)
 	if err != nil {
-		fmt.Printf("开启定时加载Triangle任务失败，err=%v\n", err)
+		log.Error("开启定时加载Triangle任务失败", "err", err)
 		return
 	}
-	err = gopool.Submit(timerGetTopic)
+	err = gopool.Submit(timerGetDynamicConfig)
 	if err != nil {
-		fmt.Printf("开启定时加载Topic任务失败，err=%v\n", err)
+		log.Error("开启定时加载动态配置任务失败", "err", err)
 		return
 	}
 
 	// 加载三角合约abi
-	if parsed, err := abi.JSON(strings.NewReader(abiStr)); err != nil {
-		fmt.Printf("加载三角合约abi失败，err=%v\n", err)
+	if parsed, err := abi.JSON(strings.NewReader(AbiStr)); err != nil {
+		log.Error("加载三角合约abi失败", "err", err)
 		return
 	} else {
 		ABI = &parsed
 	}
-	fmt.Printf("初次加载三角合约abi到内存中成功：%v\n", *ABI)
+	log.Info("加载三角合约abi到内存中成功", "AbiStr", AbiStr, "ABI", *ABI)
+
+	// printCacheToFile()
+}
+
+func printCacheToFile() {
+	createFile := func(filePath string, cache any) {
+		// 创建文件
+		file, err := os.Create(filePath)
+		if err != nil {
+			return
+		}
+		defer file.Close()
+
+		// 将 map 编码为 JSON
+		encoder := json.NewEncoder(file)
+		encoder.SetIndent("", "  ") // 设置缩进格式
+		if err := encoder.Encode(cache); err != nil {
+			return
+		}
+		log.Info("结果输出到文件完成，结束")
+	}
+
+	topicMap := pairCache.TopicMap
+	createFile("/bc/topic.json", topicMap)
+
+	triangleMap := pairCache.TriangleMap
+	createFile("/bc/triangle.json", triangleMap)
+
+	pairTriangleIdSetMap := pairCache.PairTriangleIdSetMap
+	m := make(map[string][]string)
+	for tuple := range pairTriangleIdSetMap.IterBuffered() {
+		set := tuple.Val.(*pairtypes.Set)
+		data := set.GetData()
+		m[tuple.Key] = data.Keys()
+	}
+	createFile("/bc/pairTriangleIdSet.json", m)
 
 }
 
-func GetPairControl() *pairtypes.PairCache {
+func GetPairCache() *pairtypes.PairCache {
 	return pairCache
-}
-
-func GetStateObjectCacheMap() cmap.ConcurrentMap {
-	return stateObjectCacheMap
-}
-
-func GetStorageCacheMap() cmap.ConcurrentMap {
-	return storageCacheMap
 }
 
 func timerGetTriangle() {
@@ -88,33 +139,94 @@ func timerGetTriangle() {
 	}
 }
 
-func timerGetTopic() {
+func timerGetDynamicConfig() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			fetchTopicMap()
+			fetchDynamicConfig()
 		}
 	}
 }
 
-func fetchTopicMap() {
-	// 读取文件内容
+func fetchDynamicConfig() {
+	// 发送GET请求，获取最新的配置信息
+	log.Info("开始加载动态配置")
 	start := time.Now()
-	fileContent, err := os.ReadFile("/bc/bsc/build/bin/topic.json")
+	resp, err := http.Get(ConfigItemUrl)
 	if err != nil {
-		log.Error("Failed to read file", "err", err)
+		log.Error("http请求配置url失败", "err", err)
+		return
+	}
+	defer resp.Body.Close() // 确保函数结束时关闭响应体
+
+	// 读取响应体
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Error("读取http请求响应配置数据失败", "err", err)
+		return
 	}
 
-	// 解析 JSON 文件内容到 map
-	newTopicMap := make(map[string]string)
-	err = json.Unmarshal(fileContent, &newTopicMap)
+	// 定义用于存储解析后的数据的 map
+	var result map[string]interface{}
+
+	// 解析 JSON 数据
+	err = json.Unmarshal(body, &result)
 	if err != nil {
-		log.Error("Failed to unmarshal JSON", "err", err)
+		log.Error("解析配置数据失败", "err", err)
+		return
 	}
-	pairCache.TopicMap = newTopicMap
-	log.Info("刷新内存中topic耗时", "time", time.Since(start), "topic总数", len(newTopicMap))
+
+	// 打印解析后的结果
+	log.Info("解析配置数据成功", "config-item", result)
+
+	// 获取特定的键值对
+	if isOpen, ok := result["open"].(bool); ok {
+		PairCallSwitch = isOpen
+		log.Info("刷新内存中pairCallSwitch成功", "pairCallSwitch", PairCallSwitch)
+	}
+
+	if triangleCount, ok := result["triangleCount"].(float64); ok {
+		TrianglefilterNum = int(triangleCount)
+		log.Info("刷新内存中TrianglefilterNum成功", "trianglefilterNum", TrianglefilterNum)
+	}
+
+	if threadTtl, ok := result["threadTtl"].(float64); ok {
+		PairCallTimeout = int(threadTtl)
+		log.Info("刷新内存中PairCallTimeout成功", "pairCallTimeout", PairCallTimeout)
+	}
+
+	if pairCallDeadline, ok := result["deadline"].(float64); ok {
+		PairCallDeadline = int64(pairCallDeadline)
+		log.Info("刷新内存中PairCallDeadline成功", "pairCallDeadline", PairCallDeadline)
+	}
+
+	if mevServiceUrl, ok := result["mevServiceUrl"].(string); ok {
+		MevServiceUrl = mevServiceUrl
+		log.Info("刷新内存中mevServiceUrl成功", "mevServiceUrl", MevServiceUrl)
+	}
+
+	if profitThreshold, ok := result["profitThreshold"].(float64); ok {
+		ProfitThreshold = int64(profitThreshold)
+		log.Info("刷新内存中profitThreshold成功", "profitThreshold", ProfitThreshold)
+	}
+
+	if contracts, ok := result["contracts"].(string); ok {
+		ToStr = contracts
+		To = common.HexToAddress(contracts)
+		log.Info("刷新内存中三角合约地址成功", "contracts address", To)
+	}
+
+	if topics, ok := result["topics"].(map[string]interface{}); ok {
+		newTopicMap := make(map[string]string)
+		for key, value := range topics {
+			newTopicMap[key] = value.(string)
+		}
+		pairCache.TopicMap = newTopicMap
+		log.Info("刷新内存中topic成功", "topic总数", len(newTopicMap))
+	}
+	log.Info("加载动态配置完成", "time", time.Since(start))
 }
 
 func fetchTriangleMap() {
@@ -124,7 +236,7 @@ func fetchTriangleMap() {
 	mysqlDB := mysqldb.GetMysqlDB()
 
 	// 使用流式查询，逐行处理数据
-	rows, err := mysqlDB.Queryx("select id, token0, router0, pair0, token1, router1, pair1, token2, router2, pair2 from arbitrage_triangle order by id asc")
+	rows, err := mysqlDB.Queryx("select id, token0, router0, pair0, token1, router1, pair1, token2, router2, pair2 from arbitrage_triangle order by id")
 	if err != nil {
 		log.Error("查询失败", "err", err)
 	}
@@ -142,21 +254,25 @@ func fetchTriangleMap() {
 		if err != nil {
 			log.Error("填充结果到结构体失败", "err", err)
 		}
-		triangle.Pair0 = common.HexToAddress(triangle.Pair0).Hex()
-		triangle.Pair1 = common.HexToAddress(triangle.Pair1).Hex()
-		triangle.Pair2 = common.HexToAddress(triangle.Pair2).Hex()
-		id := strconv.FormatInt(triangle.ID, 10)
-		pairCache.AddTriangle(id, triangle)
-		pairCache.AddPairTriangle(triangle.Pair0, id)
-		pairCache.AddPairTriangle(triangle.Pair1, id)
-		pairCache.AddPairTriangle(triangle.Pair2, id)
+
+		// 集群中单个节点获取分配的triangle，通过取余方式分组，余数范围：[0,ClusterTotal-1]，而ClusterId范围：[1,ClusterTotal]
+		if triangle.ID%ClusterTotal == ClusterId-1 {
+			id := strconv.FormatInt(triangle.ID, 10)
+			triangle.Pair0 = common.HexToAddress(triangle.Pair0).Hex()
+			triangle.Pair1 = common.HexToAddress(triangle.Pair1).Hex()
+			triangle.Pair2 = common.HexToAddress(triangle.Pair2).Hex()
+			pairCache.AddTriangle(id, triangle)
+			pairCache.AddPairTriangleId(triangle.Pair0, id)
+			pairCache.AddPairTriangleId(triangle.Pair1, id)
+			pairCache.AddPairTriangleId(triangle.Pair2, id)
+		}
 	}
 
 	// 检查是否有遍历中的错误
 	if err := rows.Err(); err != nil {
 		log.Error("查询失败", "err", err)
 	}
-	log.Info("刷新内存中triange耗时", "time", time.Since(start), "triange总数", pairCache.TriangleMapSize(), "pair总数", pairCache.PairTriangleMapSize())
+	log.Info("刷新内存中triange耗时", "time", time.Since(start), "triange总数", pairCache.TriangleMapSize(), "pair总数", pairCache.PairTriangleIdSetMapSize(), "集群id", ClusterId, "集群总数", ClusterTotal)
 	printMemUsed()
 }
 
@@ -164,7 +280,7 @@ func printMemUsed() {
 	// 读取 /proc/meminfo 文件
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		fmt.Printf("Error reading /proc/meminfo：%v\n", err)
+		log.Error("读取内存文件/proc/meminfo失败", "err", err)
 		return
 	}
 
@@ -188,12 +304,27 @@ func printMemUsed() {
 	totalCache := memInfo["Buffers"] + memInfo["Cached"]
 
 	// 输出总内存、空闲内存、可用内存和总缓存内存
-	fmt.Printf("Total RAM: %d MB\n", memInfo["MemTotal"]/1024)
-	fmt.Printf("Free RAM: %d MB\n", memInfo["MemFree"]/1024)
-	fmt.Printf("Available RAM: %d MB\n", memInfo["MemAvailable"]/1024)
-	fmt.Printf("Total Cached RAM (Buffers + Cached): %d MB\n", totalCache/1024)
+	log.Info("Total RAM (MB)", "MemTotal", memInfo["MemTotal"]/1024)
+	log.Info("Free RAM (MB)", "MemFree", memInfo["MemFree"]/1024)
+	log.Info("Available RAM (MB)", "MemAvailable", memInfo["MemAvailable"]/1024)
+	log.Info("Total Cached RAM (Buffers + Cached) (MB)", "Buffers + Cached", totalCache/1024)
 }
 
 func Encoder(name string, args ...interface{}) ([]byte, error) {
 	return ABI.Pack(name, args...)
+}
+
+func IsOutPairCallDeadline(blockTime *time.Time, desc string) bool {
+	timeDiff := time.Now().Sub(*blockTime).Milliseconds()
+	log.Info(desc, "与区块生成时间间隔ms", timeDiff)
+	return timeDiff > PairCallDeadline
+}
+
+func SelectRandomElements(slice []pairtypes.Triangle, count int) []pairtypes.Triangle {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	selected := make([]pairtypes.Triangle, count)
+	for i := 0; i < count; i++ {
+		selected[i] = slice[r.Intn(len(slice))]
+	}
+	return selected
 }

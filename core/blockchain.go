@@ -18,16 +18,13 @@
 package core
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/paircache"
-	"github.com/ethereum/go-ethereum/paircache/pairtypes"
 	"io"
 	"math/big"
 	"runtime"
 	"sort"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -324,8 +321,6 @@ type BlockChain struct {
 
 	// monitor
 	doubleSignMonitor *monitor.DoubleSignMonitor
-
-	ethAPI pairtypes.PairAPI
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -2193,6 +2188,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		return it.index, err
 	}
 
+	// 获取pairCache，初始化pairCall相关参数（在外侧定义主要为了适配实时同步与批量同步）
+	var pairReceipts types.Receipts
+	var blockTime time.Time
+	var blockNumber uint64
+
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
@@ -2281,6 +2281,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		statedb.SetExpectedStateRoot(block.Root())
 		pstart := time.Now()
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+
+		pairReceipts = receipts
+		blockNumber = block.Number().Uint64()
+		blockTime = time.Unix(int64(block.Time()), 0)
+		paircache.IsOutPairCallDeadline(&blockTime, "计算获取receipts成功")
+
 		close(interruptCh) // state prefetch can be stopped
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
@@ -2385,73 +2391,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				"root", block.Root())
 		}
 		bc.chainBlockFeed.Send(ChainHeadEvent{block})
-
-		// 根据receipts获取pair
-		pairCache := paircache.GetPairControl()
-		// log.Info("获取pairCache成功", "triange总数", pairCache.TriangleMap.Count(), "pair总数", pairCache.PairTriangleMap.Count())
-		pairAddrMap := make(map[string]*pairtypes.Set)
-		pairOccurTimes := 0
-		for _, receipt := range receipts {
-			for _, reLog := range receipt.Logs {
-				// marshalLog, _ := json.Marshal(reLog)
-				// log.Debug("收据日志打印，", "logBlockNum", reLog.BlockNumber, "区块对应的收据receipt.Logs", marshalLog)
-				topics := reLog.Topics
-				if len(topics) > 0 {
-					topic0Str := "0x" + hex.EncodeToString(topics[0][:])
-					topicOper := pairCache.TopicMap[topic0Str]
-					if topicOper != "" {
-						var address string
-						if topicOper == "Balancer" {
-							address = "0x" + hex.EncodeToString(topics[1][0:20])
-						} else {
-							address = "0x" + hex.EncodeToString(reLog.Address[:])
-						}
-						pairOccurTimes++
-						address = common.HexToAddress(address).Hex()
-						pairAddrMap[address] = pairCache.GetPairSet(address)
-						log.Debug("交易收据日志打印，", "logBlockNum", reLog.BlockNumber, "Log.Index", reLog.Index, "topic", topic0Str, "topicOper", topicOper, "address", address)
-					}
-				}
-			}
-		}
-		// log.Info("pair统计信息，", "logBlockNum", block.Number().Uint64(), "pairAddrNum", len(pairAddrMap), "addrOccurTimes", pairOccurTimes, "pairMap", pairAddrMap)
-		// log.Info("pair统计信息，", "logBlockNum", block.Number().Uint64(), "pairAddrNum", len(pairAddrMap), "addrOccurTimes", pairOccurTimes)
-
-		// 根据pair获取triangle，一个pair对应一组triangleId，多个pair又可能对应同一个triangleId，所以循环每组triangleId去重
-		var triangles []pairtypes.Triangle
-		filterMap := make(map[string]bool)
-		for _, triangleIdSet := range pairAddrMap {
-			for _, triangleId := range triangleIdSet.GetData().Keys() {
-				if filterMap[triangleId] {
-					continue
-				}
-
-				if triangle, exists := pairCache.GetTriangle(triangleId); exists {
-					triangles = append(triangles, triangle)
-					filterMap[triangleId] = true
-					if triangleId != strconv.FormatInt(triangle.ID, 10) {
-						log.Info("triangleId和triangle.ID比较不相同", "triangleId", triangleId, "triangle.ID", triangle.ID)
-					}
-				}
-			}
-		}
-		lenth := len(triangles)
-		lenthfilter := len(filterMap)
-		log.Info("去重获取triangles", "triangles个数", lenth, "去重获取triangleId个数", lenthfilter)
-		if lenth > 0 {
-			filterLenth := 100
-			if lenth <= filterLenth {
-				log.Info("获取triangle数量", "lenth", lenth)
-				bc.ethAPI.PairCallBatch(triangles)
-			} else {
-				log.Info("过滤获取triangle数量", "lenth", filterLenth)
-				bc.ethAPI.PairCallBatch(selectRandomElements(triangles, filterLenth))
-				if err != nil {
-					log.Error("triangles执行eth_call失败", "err", err)
-				}
-			}
-		}
-
 	}
 
 	// Any blocks remaining here? The only ones we care about are the future ones
@@ -2469,6 +2408,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 	}
 	stats.ignored += it.remaining()
+
+	// 判断当前为最新区块实时单个导入则执行pairCall
+	if len(chain) == 1 {
+		// 判断当前时间未超过配置的pair处理限制时间，执行pairCall，否则直接跳过
+		if deadline := paircache.IsOutPairCallDeadline(&blockTime, "同步持久化落块"); !deadline {
+			pairCall(pairReceipts, &blockTime, blockNumber)
+		}
+	}
 
 	return it.index, err
 }

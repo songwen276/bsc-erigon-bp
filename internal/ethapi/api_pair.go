@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/paircache"
 	"github.com/ethereum/go-ethereum/paircache/pairtypes"
+	"github.com/ethereum/go-ethereum/paircache/roi"
 	solsha3 "github.com/miguelmota/go-solidity-sha3"
 	"math/big"
 	"os"
@@ -71,7 +72,7 @@ func EncodePackedBsc(values []interface{}) (string, error) {
 			addrStr := v.Hex()[2:]
 			encoded = encoded + addrStr
 		default:
-			return "", fmt.Errorf("unsupported type: %T", value)
+			return "", fmt.Errorf("不支持该类型编码 type: %T", value)
 		}
 	}
 	return encoded, nil
@@ -101,10 +102,12 @@ func getRoisTest(s *BlockChainAPI, triangular *pairtypes.ITriangularArbitrageTri
 	} else {
 		roiStr := hex.EncodeToString(call)
 		lenth := len(roiStr) / 64
+
+		// 前两条为偏移量和rois数组长度，不计入rois
 		rois := make([]*big.Int, lenth-2)
 		for j := 0; j < lenth; j++ {
 			subStr := roiStr[64*j : 64*(j+1)]
-			log.Info("CallReturn EncodeToString", "roiStr", subStr)
+			log.Info("eth_call方法返回值[]byte类型分片转为hexString类型", "roiStr", subStr)
 			if j > 1 {
 				roi, _ := new(big.Int).SetString(subStr, 16)
 				rois[j-2] = roi
@@ -124,10 +127,13 @@ func getRois(s *BlockChainAPI, triangular *pairtypes.ITriangularArbitrageTriangu
 	} else {
 		roiStr := hex.EncodeToString(call)
 		lenth := len(roiStr) / 64
+
+		// 前两条为偏移量和rois数组长度，不计入rois
 		rois := make([]*big.Int, lenth-2)
 		for j := 0; j < lenth; j++ {
+			subStr := roiStr[64*j : 64*(j+1)]
 			if j > 1 {
-				roi, _ := new(big.Int).SetString(roiStr[64*j:64*(j+1)], 16)
+				roi, _ := new(big.Int).SetString(subStr, 16)
 				rois[j-2] = roi
 			}
 		}
@@ -189,19 +195,17 @@ func directResolveIndex(s *BlockChainAPI, triangular *pairtypes.ITriangularArbit
 	return i, nil
 }
 
-func SubmitTestCall(wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle *pairtypes.Triangle) {
-	t := *triangle
+func SubmitTestCall(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	gopool.Submit(func() {
 		defer wg.Done()
-		workerTest(s, results, t)
+		workerTest(ctx, s, results, triangle)
 	})
 }
 
-func SubmitCall(wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle *pairtypes.Triangle) {
-	t := *triangle
+func SubmitCall(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	gopool.Submit(func() {
 		defer wg.Done()
-		pairWorker(s, results, t)
+		pairWorker(ctx, s, results, triangle)
 	})
 }
 
@@ -233,9 +237,8 @@ func (s *BlockChainAPI) FlagCall(ctx context.Context, args TransactionArgs, bloc
 	return result.Return(), result.Err
 }
 
-func workerDirect(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
-	// 设置上下文，用于控制每个任务方法执行超时时间
-	ctx := context.Background()
+func workerDirect(ctx context.Context, s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
+	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
 	triangular := &pairtypes.ITriangularArbitrageTriangular{
 		Token0:  common.HexToAddress(triangle.Token0),
 		Router0: common.HexToAddress(triangle.Router0),
@@ -248,52 +251,58 @@ func workerDirect(s *BlockChainAPI, results chan<- interface{}, triangle pairtyp
 		Pair2:   common.HexToAddress(triangle.Pair2),
 	}
 
-	param := getArbitrageQueryParam(big.NewInt(0), 0, 10000)
-	index, err := directResolveIndex(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
-	log.Info("10000step", "start", param.Start, "end", param.End, "step", param.Pieces, "index", index)
+	// 初始化参数
+	var (
+		param *ArbitrageQueryParam
+		index int
+		call  hexutil.Bytes
+		err   error
+	)
 
-	param = getArbitrageQueryParam(param.Start, index, 1000)
-	index, err = directResolveIndex(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
-	log.Info("1000step", "start", param.Start, "end", param.End, "step", param.Pieces, "index", index)
+	// 根据步长循环查询rois
+	stepSizes := [5]int{10000, 1000, 100, 10, 1}
+	for _, stepSize := range stepSizes {
+		// 构造步长参数
+		if stepSize == 10000 {
+			param = getArbitrageQueryParam(big.NewInt(0), 0, 10000)
+		} else if stepSize == 1 {
+			point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
+			if point.Cmp(big.NewInt(0)) == 0 {
+				results <- nil
+				return
+			}
+			param.Start = point
+			param.End = point
+			param.Pieces = big.NewInt(1)
+		} else {
+			param = getArbitrageQueryParam(param.Start, index, stepSize)
+		}
 
-	param = getArbitrageQueryParam(param.Start, index, 100)
-	index, err = directResolveIndex(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
-	log.Info("100step", "start", param.Start, "end", param.End, "step", param.Pieces, "index", index)
+		// 由于getRois相对较耗时，使用 select 来控制任务执行时间，每次执行都检查任务是否超时
+		select {
+		// 上下文超时取消后直接返回，不再执行后面的逻辑
+		case <-ctx.Done():
+			return
+		default:
+		}
 
-	param = getArbitrageQueryParam(param.Start, index, 10)
-	index, err = directResolveIndex(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
+		// 如果查询步长为1，则直接查询rois字节数组，否则查询index
+		if stepSize == 1 {
+			call, err = getRoisDirect(s, triangular, param, ctx)
+			if err != nil {
+				results <- err
+				return
+			}
+		} else {
+			index, err = directResolveIndex(s, triangular, param, ctx)
+			log.Info("直接返回index", "start", param.Start, "end", param.End, "step", param.Pieces, "index", index)
+			if err != nil {
+				results <- err
+				return
+			}
+		}
 	}
-	log.Info("10step", "start", param.Start, "end", param.End, "step", param.Pieces, "index", index)
 
-	point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
-	if point.Cmp(big.NewInt(0)) == 0 {
-		results <- nil
-		return
-	}
-	param.Start = point
-	param.End = point
-	param.Pieces = big.NewInt(1)
-
-	call, err := getRoisDirect(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
 	roisBytes := call[32*2:]
 	roisStr := hex.EncodeToString(roisBytes)
 	var rois []string
@@ -302,7 +311,7 @@ func workerDirect(s *BlockChainAPI, results chan<- interface{}, triangle pairtyp
 	}
 
 	roi13 := new(big.Int).SetBytes(roisBytes[32*12 : 32*13])
-	if call == nil || roi13.Cmp(big.NewInt(5000000)) < 0 {
+	if call == nil || roi13.Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
 		results <- nil
 		return
 	}
@@ -346,9 +355,8 @@ func workerDirect(s *BlockChainAPI, results chan<- interface{}, triangle pairtyp
 	return
 }
 
-func workerTest(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
-	// 设置上下文，用于控制每个任务方法执行超时时间
-	ctx := context.Background()
+func workerTest(ctx context.Context, s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
+	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
 	triangular := &pairtypes.ITriangularArbitrageTriangular{
 		Token0:  common.HexToAddress(triangle.Token0),
 		Router0: common.HexToAddress(triangle.Router0),
@@ -361,58 +369,55 @@ func workerTest(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes
 		Pair2:   common.HexToAddress(triangle.Pair2),
 	}
 
-	param := getArbitrageQueryParam(big.NewInt(0), 0, 10000)
-	rois, err := getRoisTest(s, triangular, param, ctx)
-	log.Info("10000step", "start", param.Start, "end", param.End, "step", param.Pieces, "rois", rois)
-	if err != nil {
-		results <- err
-		return
+	// 初始化参数
+	var (
+		param *ArbitrageQueryParam
+		index int
+		rois  []*big.Int
+		err   error
+	)
+
+	// 根据步长循环查询rois
+	stepSizes := [5]int{10000, 1000, 100, 10, 1}
+	for _, stepSize := range stepSizes {
+		// 构造步长参数
+		if stepSize == 10000 {
+			param = getArbitrageQueryParam(big.NewInt(0), 0, 10000)
+		} else if stepSize == 1 {
+			point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
+			if point.Cmp(big.NewInt(0)) == 0 {
+				results <- nil
+				return
+			}
+			param.Start = point
+			param.End = point
+			param.Pieces = big.NewInt(1)
+		} else {
+			param = getArbitrageQueryParam(param.Start, index, stepSize)
+		}
+
+		// 由于getRois相对较耗时，使用 select 来控制任务执行时间，每次执行都检查任务是否超时
+		select {
+		// 上下文超时取消后直接返回，不再执行后面的逻辑
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// 查询对应步长rois
+		rois, err = getRoisTest(s, triangular, param, ctx)
+		log.Info("查询rois", "start", param.Start, "end", param.End, "step", param.Pieces, "rois", rois)
+		if err != nil {
+			results <- err
+			return
+		}
+
+		if stepSize != 1 {
+			index = resolveROI(rois)
+		}
 	}
 
-	index := resolveROI(rois)
-	param = getArbitrageQueryParam(param.Start, index, 1000)
-	rois, err = getRoisTest(s, triangular, param, ctx)
-	log.Info("1000step", "start", param.Start, "end", param.End, "step", param.Pieces, "rois", rois)
-	if err != nil {
-		results <- err
-		return
-	}
-	index = resolveROI(rois)
-
-	param = getArbitrageQueryParam(param.Start, index, 100)
-	rois, err = getRoisTest(s, triangular, param, ctx)
-	log.Info("100step", "start", param.Start, "end", param.End, "step", param.Pieces, "rois", rois)
-	if err != nil {
-		results <- err
-		return
-	}
-	index = resolveROI(rois)
-
-	param = getArbitrageQueryParam(param.Start, index, 10)
-	rois, err = getRoisTest(s, triangular, param, ctx)
-	log.Info("10step", "start", param.Start, "end", param.End, "step", param.Pieces, "rois", rois)
-	if err != nil {
-		results <- err
-		return
-	}
-	index = resolveROI(rois)
-	point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
-	if point.Cmp(big.NewInt(0)) == 0 {
-		results <- nil
-		return
-	}
-	param.Start = point
-	param.End = point
-	param.Pieces = big.NewInt(1)
-
-	rois, err = getRoisTest(s, triangular, param, ctx)
-	log.Info("point", "start", param.Start, "end", param.End, "step", param.Pieces, "rois", rois)
-	if err != nil {
-		results <- err
-		return
-	}
-
-	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(5000000)) < 0 {
+	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
 		results <- nil
 		return
 	}
@@ -446,6 +451,8 @@ func workerTest(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes
 		return
 	}
 
+	log.Info("编码calldata成功", "calldata", calldata)
+
 	ROI := &ROI{
 		Triangle: triangle,
 		CallData: calldata,
@@ -456,9 +463,8 @@ func workerTest(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes
 	return
 }
 
-func pairWorker(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
-	// 设置上下文，用于控制每个任务方法执行超时时间
-	ctx := context.Background()
+func pairWorker(ctx context.Context, s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
+	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
 	triangular := &pairtypes.ITriangularArbitrageTriangular{
 		Token0:  common.HexToAddress(triangle.Token0),
 		Router0: common.HexToAddress(triangle.Router0),
@@ -471,53 +477,54 @@ func pairWorker(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes
 		Pair2:   common.HexToAddress(triangle.Pair2),
 	}
 
-	param := getArbitrageQueryParam(big.NewInt(0), 0, 10000)
-	rois, err := getRois(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
+	// 初始化参数
+	var (
+		param *ArbitrageQueryParam
+		index int
+		rois  []*big.Int
+		err   error
+	)
+
+	// 根据步长循环查询rois
+	stepSizes := [5]int{10000, 1000, 100, 10, 1}
+	for _, stepSize := range stepSizes {
+		// 构造步长参数
+		if stepSize == 10000 {
+			param = getArbitrageQueryParam(big.NewInt(0), 0, 10000)
+		} else if stepSize == 1 {
+			point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
+			if point.Cmp(big.NewInt(0)) == 0 {
+				results <- nil
+				return
+			}
+			param.Start = point
+			param.End = point
+			param.Pieces = big.NewInt(1)
+		} else {
+			param = getArbitrageQueryParam(param.Start, index, stepSize)
+		}
+
+		// 由于getRois相对较耗时，使用 select 来控制任务执行时间，每次执行都检查任务是否超时
+		select {
+		// 上下文超时取消后直接返回，不再执行后面的逻辑
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// 查询对应步长rois
+		rois, err = getRois(s, triangular, param, ctx)
+		if err != nil {
+			results <- err
+			return
+		}
+
+		if stepSize != 1 {
+			index = resolveROI(rois)
+		}
 	}
 
-	index := resolveROI(rois)
-	param = getArbitrageQueryParam(param.Start, index, 1000)
-	rois, err = getRois(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
-	index = resolveROI(rois)
-
-	param = getArbitrageQueryParam(param.Start, index, 100)
-	rois, err = getRois(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
-	index = resolveROI(rois)
-
-	param = getArbitrageQueryParam(param.Start, index, 10)
-	rois, err = getRois(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
-	index = resolveROI(rois)
-	point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
-	if point.Cmp(big.NewInt(0)) == 0 {
-		results <- nil
-		return
-	}
-	param.Start = point
-	param.End = point
-	param.Pieces = big.NewInt(1)
-
-	rois, err = getRois(s, triangular, param, ctx)
-	if err != nil {
-		results <- err
-		return
-	}
-
-	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(5000000)) < 0 {
+	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
 		results <- nil
 		return
 	}
@@ -564,22 +571,24 @@ func pairWorker(s *BlockChainAPI, results chan<- interface{}, triangle pairtypes
 func (s *BlockChainAPI) CallBatch() (string, error) {
 	// 读取任务测试数据
 	log.Info("开始执行CallBatch")
-	var triangles []*pairtypes.Triangle
-	oriTriangular := &pairtypes.Triangle{
-		ID:      1,
-		Token0:  "0xeBBAefF6217d22E7744394061D874015709b8141",
+	var triangles []pairtypes.Triangle
+	oriTriangle := pairtypes.Triangle{
+		ID:      10066542,
+		Token0:  "0x55d398326f99059fF775485246999027B3197955",
 		Router0: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865",
-		Pair0:   "0x170a4d2A29b30c6551f6a4C0CB527e7A9Cb7D526",
+		Pair0:   "0x172fcD41E0913e95784454622d1c3724f546f849",
 		Token1:  "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
-		Router1: "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7",
-		Pair1:   "0xCB99FE720124129520f7a09Ca3CBEF78D58Ed934",
-		Token2:  "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
-		Router2: "0x10ED43C718714eb63d5aA57B78B54704E256024E",
-		Pair2:   "0xc1fE0336456a8D4550ab0E1e528a684Bcf7bD3F8",
+		Router1: "0xa82f327BBbF0667356D2935C6532d164b06cEced",
+		Pair1:   "0xaEcf01c5a659d74Dc33C9C922a4458eAB0b13DeA",
+		Token2:  "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
+		Router2: "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7",
+		Pair2:   "0xF7513c120B92fA4dd5CBfA78dFFEfcB4ceD5743f",
 	}
-	triangles = append(triangles, oriTriangular)
+	triangles = append(triangles, oriTriangle)
 
-	// 初始化构造当前区块公共数据
+	// 创建一个 2 秒超时的上下文，初始化构造当前区块公共数据
+	ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Millisecond)
+	defer cancel()
 	start := time.Now()
 	results := make(chan interface{}, len(triangles))
 
@@ -587,12 +596,13 @@ func (s *BlockChainAPI) CallBatch() (string, error) {
 	var wg sync.WaitGroup
 	for _, triangle := range triangles {
 		wg.Add(1)
-		SubmitTestCall(&wg, s, results, triangle)
+		SubmitTestCall(ctx, &wg, s, results, triangle)
 	}
 	wg.Wait()
 	close(results)
 	selectSince := time.Since(start)
-	log.Info("所有eth_call查询任务执行完成花费时长", "runtime", selectSince, "所在的区块号", s.BlockNumber())
+	blockNumber := uint64(s.BlockNumber())
+	log.Info("所有eth_call查询任务执行完成花费时长", "runtime", selectSince, "所在的区块号", blockNumber)
 
 	// 读取任务结果通道数据进行处理
 	rois := make([]ROI, 0, 5000)
@@ -604,7 +614,6 @@ func (s *BlockChainAPI) CallBatch() (string, error) {
 		switch v := result.(type) {
 		case *ROI:
 			rois = append(rois, *v)
-			resultMap[itoa] = *v
 		case error:
 			resultMap[itoa] = v.Error()
 		default:
@@ -637,10 +646,10 @@ func (s *BlockChainAPI) CallBatch() (string, error) {
 			uniquePairs[roi.Triangle.Pair1] = true
 			uniquePairs[roi.Triangle.Pair2] = true
 		}
-		log.Info("排序去重获rois成功", "filteredROIs", filteredROIs)
+		log.Info("排序去重获rois成功", "个数", len(filteredROIs), "filteredROIs", filteredROIs)
 
 		// 计算预估总gas
-		var gasTotal hexutil.Uint64
+		var finalROIs []roi.ROI
 		for _, filteredROI := range filteredROIs {
 			decodeString, _ := hex.DecodeString(filteredROI.CallData)
 			bytes := hexutil.Bytes(decodeString)
@@ -648,113 +657,150 @@ func (s *BlockChainAPI) CallBatch() (string, error) {
 			gas, err := s.EstimateGas(context.Background(), args, &LatestBlockNumber, nil)
 			if err != nil {
 				log.Error("存在roi的预估gas计算异常", "err", err)
+			} else {
+				newROI := roi.ROI{
+					ChainId:     paircache.ChainId,
+					Type:        paircache.Type,
+					ClusterId:   paircache.ClusterId,
+					EntityId:    filteredROI.Triangle.ID,
+					BlockNumber: blockNumber,
+					CallData:    filteredROI.CallData,
+					Profit:      filteredROI.Profit,
+					GasUsed:     uint64(gas),
+					To:          paircache.ToStr,
+				}
+				finalROIs = append(finalROIs, newROI)
 			}
-			gasTotal = gasTotal + gas
 		}
-		log.Info("计算预估总gas成功", "gasTotal", gasTotal)
+		roi.SendRois(finalROIs)
 	}
 
 	totalSince := time.Since(start)
 	r := Results{GetDatasSince: 0, SelectSince: selectSince, TotalSince: totalSince, ResultMap: resultMap}
-
-	// 创建文件
-	file, err := os.Create("/bc/bsc/build/bin/results.json")
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	// 将 map 编码为 JSON
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ") // 设置缩进格式
-	if err := encoder.Encode(r); err != nil {
-		return "", err
-	}
-	log.Info("结果输出到文件完成，结束")
+	log.Info("结果输出到文件完成，结束", "resultMap", r)
 	return "ok", nil
 }
 
 // PairCallBatch executes Call
-func (s *BlockChainAPI) PairCallBatch(triangles []pairtypes.Triangle) error {
-	// 初始化构造当前区块公共数据
-	start := time.Now()
+func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriangle) {
+	// 获取剩余处理时间，若剩余时间大于0，则继续
 	log.Info("开始执行PairCallBatch")
-	results := make(chan interface{}, len(triangles))
+	blockTime := transferTriangle.BlockTime
+	restTime := paircache.PairCallDeadline - time.Now().Sub(*blockTime).Milliseconds()
+	if restTime < 0 {
+		return
+	}
 
-	// 提交任务到协程池，所有协程完成后关闭结果读取通道
+	// 根据剩余时间设置超时上下文，初始化参数
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(restTime)*time.Millisecond)
+	defer cancel()
+	triangles := transferTriangle.Triangles
+	results := make(chan interface{}, len(triangles))
+	var cacheBlockNumber uint64
+
+Loop1:
+	for {
+		select {
+		case <-ctx.Done():
+			// 超时后停止
+			return
+		default:
+			cacheBlockNumber = uint64(s.BlockNumber())
+			if cacheBlockNumber == transferTriangle.BlockNumber {
+				break Loop1
+			}
+		}
+	}
+
+	// 开启一个协程监听结果通道，当有结果时将其添加到切片中，并在超过处理时间限制后，对切片中的结果进行处理
+	go func() {
+		rois := make([]ROI, 0, 5000)
+	Loop2:
+		for {
+			select {
+			case result := <-results:
+				if roi, ok := result.(*ROI); ok {
+					rois = append(rois, *roi)
+				}
+			case <-ctx.Done():
+				// 超时后停止读取
+				break Loop2
+			}
+		}
+		roiLen := len(rois)
+		paircache.IsOutPairCallDeadline(blockTime, "限时获取rois完成，个数="+strconv.Itoa(roiLen))
+
+		// 读取任务结果通道数据进行处理
+		if roiLen > 0 {
+			// 按 Profit 字段对rois进行降序排序
+			log.Info("开始处理发送rois", "最新区块号", transferTriangle.BlockNumber, "缓存区块号", cacheBlockNumber, "rois", rois)
+			sort.Slice(rois, func(i, j int) bool {
+				return rois[i].Profit.Cmp(&rois[j].Profit) > 0
+			})
+			log.Info("降序排序rois成功", "rois", rois)
+
+			// 将排序后的rois去重过滤，保证每个pair只能出现一次，重复时将Profit较小的ROI都删除，只保留Profit最大的ROI
+			// 去重，保证 Pair0, Pair1, Pair2 中的值只出现一次
+			uniquePairs := make(map[string]bool)
+			var filteredROIs []ROI
+			for _, roi := range rois {
+				if uniquePairs[roi.Triangle.Pair0] || uniquePairs[roi.Triangle.Pair1] || uniquePairs[roi.Triangle.Pair2] {
+					// 如果任何一个 pair 已经出现过，跳过该结构体（删除）
+					continue
+				}
+
+				// 如果不存在，则将该结构体加入结果集，并标记 pairs 为已出现
+				filteredROIs = append(filteredROIs, roi)
+				uniquePairs[roi.Triangle.Pair0] = true
+				uniquePairs[roi.Triangle.Pair1] = true
+				uniquePairs[roi.Triangle.Pair2] = true
+			}
+			log.Info("排序去重获rois成功", "个数", len(filteredROIs), "filteredROIs", filteredROIs)
+
+			// 计算预估总gas
+			var finalROIs []roi.ROI
+			for _, filteredROI := range filteredROIs {
+				decodeString, _ := hex.DecodeString(filteredROI.CallData)
+				bytes := hexutil.Bytes(decodeString)
+				args := TransactionArgs{From: &paircache.From, To: &paircache.To, Data: &bytes}
+				gas, err := s.EstimateGas(context.Background(), args, &LatestBlockNumber, nil)
+				if err != nil {
+					log.Error("存在roi的预估gas计算异常", "err", err)
+				} else {
+					newROI := roi.ROI{
+						ChainId:     paircache.ChainId,
+						Type:        paircache.Type,
+						ClusterId:   paircache.ClusterId,
+						EntityId:    filteredROI.Triangle.ID,
+						BlockNumber: transferTriangle.BlockNumber,
+						CallData:    filteredROI.CallData,
+						Profit:      filteredROI.Profit,
+						GasUsed:     uint64(gas),
+						To:          paircache.ToStr,
+					}
+					finalROIs = append(finalROIs, newROI)
+				}
+			}
+			if len(finalROIs) > 0 {
+				roi.SendRois(finalROIs)
+				paircache.IsOutPairCallDeadline(blockTime, "eth_call查询结果发送处理完成")
+			}
+		}
+
+	}()
+
+	// 提交任务到协程池，判断如果当前时间超过处理限制时间则后续任务不提交，提交的任务的协程由上面的超时上下文来控制结束
 	var wg sync.WaitGroup
 	for _, triangle := range triangles {
+		timeDiff := time.Now().Sub(*blockTime).Milliseconds()
+		if timeDiff > paircache.PairCallDeadline {
+			break
+		}
 		wg.Add(1)
-		SubmitCall(&wg, s, results, &triangle)
+		SubmitCall(ctx, &wg, s, results, triangle)
 	}
 	wg.Wait()
 	close(results)
-	selectSince := time.Since(start)
-	log.Info("所有eth_call查询任务执行完成花费时长", "runtime", selectSince, "所在的区块号", s.BlockNumber())
-
-	// 读取任务结果通道数据进行处理
-	rois := make([]ROI, 0, 5000)
-	resultMap := make(map[string]interface{}, len(triangles))
-	i := 1
-	// 处理结果
-	for result := range results {
-		itoa := strconv.Itoa(i)
-		switch v := result.(type) {
-		case *ROI:
-			rois = append(rois, *v)
-		case error:
-			resultMap[itoa] = v.Error()
-		default:
-			resultMap[itoa] = v
-		}
-		i += 1
-	}
-
-	if len(rois) > 0 {
-		// 按 Profit 字段对rois进行降序排序
-		log.Info("排序前的rois", "rois", rois)
-		sort.Slice(rois, func(i, j int) bool {
-			return rois[i].Profit.Cmp(&rois[j].Profit) > 0
-		})
-		log.Info("降序排序rois成功", "rois", rois)
-
-		// 将排序后的rois去重过滤，保证每个pair只能出现一次，重复时将Profit较小的ROI都删除，只保留Profit最大的ROI
-		// 去重，保证 Pair0, Pair1, Pair2 中的值只出现一次
-		uniquePairs := make(map[string]bool)
-		var filteredROIs []ROI
-		for _, roi := range rois {
-			if uniquePairs[roi.Triangle.Pair0] || uniquePairs[roi.Triangle.Pair1] || uniquePairs[roi.Triangle.Pair2] {
-				// 如果任何一个 pair 已经出现过，跳过该结构体（删除）
-				continue
-			}
-
-			// 如果不存在，则将该结构体加入结果集，并标记 pairs 为已出现
-			filteredROIs = append(filteredROIs, roi)
-			uniquePairs[roi.Triangle.Pair0] = true
-			uniquePairs[roi.Triangle.Pair1] = true
-			uniquePairs[roi.Triangle.Pair2] = true
-		}
-		log.Info("排序去重获rois成功", "filteredROIs", filteredROIs)
-
-		// 计算预估总gas
-		var gasTotal hexutil.Uint64
-		for _, filteredROI := range filteredROIs {
-			decodeString, _ := hex.DecodeString(filteredROI.CallData)
-			bytes := hexutil.Bytes(decodeString)
-			args := TransactionArgs{From: &paircache.From, To: &paircache.To, Data: &bytes}
-			gas, err := s.EstimateGas(context.Background(), args, &LatestBlockNumber, nil)
-			if err != nil {
-				log.Error("存在roi的预估gas计算异常", "err", err)
-			}
-			gasTotal = gasTotal + gas
-		}
-		log.Info("计算预估总gas成功", "gasTotal", gasTotal)
-	}
-
-	totalSince := time.Since(start)
-	log.Info("处理结果完成", "共耗时", totalSince)
-
-	return nil
 }
 
 func GetEthCallData() ([]CallBatchArgs, error) {

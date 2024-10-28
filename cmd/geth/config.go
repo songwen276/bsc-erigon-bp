@@ -20,10 +20,14 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/paircache"
+	pairconfig "github.com/ethereum/go-ethereum/paircache/config"
+	"github.com/ethereum/go-ethereum/paircache/mysqldb"
 	"os"
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/ethereum/go-ethereum/eth/downloader"
@@ -98,6 +102,7 @@ type gethConfig struct {
 	Ethstats   ethstatsConfig
 	Metrics    metrics.Config
 	FakeBeacon fakebeacon.Config
+	Pair       pairconfig.Config
 }
 
 func loadConfig(file string, cfg *gethConfig) error {
@@ -134,6 +139,7 @@ func loadBaseConfig(ctx *cli.Context) gethConfig {
 		Eth:     ethconfig.Defaults,
 		Node:    defaultNodeConfig(),
 		Metrics: metrics.DefaultConfig,
+		Pair:    pairconfig.DefaultConfig,
 	}
 
 	// Load config file.
@@ -253,6 +259,26 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 	if cfg.FakeBeacon.Enable || ctx.IsSet(utils.FakeBeaconEnabledFlag.Name) {
 		go fakebeacon.NewService(&cfg.FakeBeacon, backend).Run()
 	}
+
+	// 配置mysql信息
+	mysqldb.User = cfg.Pair.MysqlUser
+	mysqldb.Password = cfg.Pair.MysqlPwd
+	mysqldb.Hostname = cfg.Pair.MysqlHost
+	mysqldb.Dbname = cfg.Pair.MysqlDb
+	mysqldb.MaxOpenConns = cfg.Pair.MysqlMaxOpenConns
+	mysqldb.MaxIdleConns = cfg.Pair.MysqlMaxIdleConns
+	mysqldb.ConnMaxLifetime = time.Duration(cfg.Pair.MysqlConnMaxLifetime) * time.Second
+	mysqldb.InitDB()
+
+	// 配置节点clusterid
+	paircache.AbiStr = cfg.Pair.PaircacheAbistr
+	paircache.From = common.HexToAddress(cfg.Pair.PaircacheFrom)
+	paircache.ClusterId = cfg.Pair.ClusterId
+	paircache.ClusterTotal = cfg.Pair.ClusterTotal
+	paircache.ConfigItemUrl = cfg.Pair.ConfigItemUrl
+	paircache.ChainId = cfg.Pair.ChainId
+	paircache.Type = cfg.Pair.Type
+	paircache.InitPairCache()
 
 	git, _ := version.VCS()
 	utils.SetupMetrics(ctx,

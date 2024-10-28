@@ -3,13 +3,20 @@ package pairtypes
 import (
 	"fmt"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/orcaman/concurrent-map"
+	cmap "github.com/orcaman/concurrent-map"
 	"strings"
+	"time"
 )
 
 type PairAPI interface {
-	PairCallBatch(triangulars []Triangle) error
+	PairCallBatch(transferTriangle *TransferTriangle)
 	CallBatch() (string, error)
+}
+
+type TransferTriangle struct {
+	BlockNumber uint64
+	BlockTime   *time.Time
+	Triangles   []Triangle
 }
 
 type Triangle struct {
@@ -38,16 +45,16 @@ type ITriangularArbitrageTriangular struct {
 }
 
 type PairCache struct {
-	TriangleMap     cmap.ConcurrentMap
-	PairTriangleMap cmap.ConcurrentMap
-	TopicMap        map[string]string
+	TriangleMap          cmap.ConcurrentMap
+	PairTriangleIdSetMap cmap.ConcurrentMap
+	TopicMap             map[string]string
 }
 
 // NewPairCache 创建一个新的 PairCache
 func NewPairCache() *PairCache {
 	return &PairCache{
-		TriangleMap:     cmap.New(),
-		PairTriangleMap: cmap.New(),
+		TriangleMap:          cmap.New(),
+		PairTriangleIdSetMap: cmap.New(),
 	}
 }
 
@@ -56,15 +63,15 @@ func (pc *PairCache) AddTriangle(id string, triangle Triangle) {
 	pc.TriangleMap.Set(id, triangle)
 }
 
-// AddPairTriangle 向 PairTriangleMap 添加一个元素
-func (pc *PairCache) AddPairTriangle(pair string, id string) {
+// AddPairTriangleId 向 PairTriangleIdSetMap内的TriangleIdSet 添加一个元素
+func (pc *PairCache) AddPairTriangleId(pair string, id string) {
 	// 如果 key 不存在，则创建一个新的 Set
-	if set, exists := pc.PairTriangleMap.Get(pair); exists {
+	if set, exists := pc.PairTriangleIdSetMap.Get(pair); exists {
 		set.(*Set).Add(id)
 	} else {
 		newSet := NewSet()
 		newSet.Add(id)
-		pc.PairTriangleMap.Set(pair, newSet)
+		pc.PairTriangleIdSetMap.Set(pair, newSet)
 	}
 }
 
@@ -77,9 +84,9 @@ func (pc *PairCache) GetTriangle(id string) (Triangle, bool) {
 	}
 }
 
-// GetPairSet 安全地从 PairTriangleMap 中获取 Set
-func (pc *PairCache) GetPairSet(pair string) *Set {
-	if set, exists := pc.PairTriangleMap.Get(pair); exists {
+// GetPairTriangleIdSet 安全地从 PairTriangleIdSetMap 中获取 TriangleIdSet
+func (pc *PairCache) GetPairTriangleIdSet(pair string) *Set {
+	if set, exists := pc.PairTriangleIdSetMap.Get(pair); exists {
 		return set.(*Set)
 	}
 	return NewSet()
@@ -90,9 +97,9 @@ func (pc *PairCache) TriangleMapSize() int {
 	return pc.TriangleMap.Count()
 }
 
-// PairTriangleMapSize 返回 PairTriangleMap 中的元素数量
-func (pc *PairCache) PairTriangleMapSize() int {
-	return pc.PairTriangleMap.Count()
+// PairTriangleIdSetMapSize 返回 PairTriangleIdSetMap 中的元素数量
+func (pc *PairCache) PairTriangleIdSetMapSize() int {
+	return pc.PairTriangleIdSetMap.Count()
 }
 
 // Set 实现一个set
