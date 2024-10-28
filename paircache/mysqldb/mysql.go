@@ -23,6 +23,7 @@ var (
 
 // InitDB 初始化数据库连接
 func InitDB() {
+	log.Info("init db", "User", User, "Password", Password, "Hostname", Hostname, "Dbname", Dbname)
 	once.Do(func() {
 		// 构建 DSN (Data Source Name)
 		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true", User, Password, Hostname, Dbname)
