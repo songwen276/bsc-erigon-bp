@@ -38,6 +38,7 @@ var (
 	PairCallDeadline  int64
 	PairCallSwitch    bool
 	ProfitThreshold   int64
+	EsGasLimit        uint64
 )
 
 // 处理通道中的数据

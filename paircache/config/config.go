@@ -28,6 +28,8 @@ type Config struct {
 	ChainId int64 `toml:"chain-id"`
 
 	Type string `toml:"type"`
+
+	EsGasLimit uint64 `toml:"esgaslimit"`
 }
 
 var DefaultConfig = Config{

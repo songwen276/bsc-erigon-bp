@@ -202,9 +202,8 @@ func SubmitTestCall(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, r
 	})
 }
 
-func SubmitCall(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
+func SubmitCall(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	gopool.Submit(func() {
-		defer wg.Done()
 		pairWorker(ctx, s, results, triangle)
 	})
 }
@@ -237,7 +236,7 @@ func (s *BlockChainAPI) FlagCall(ctx context.Context, args TransactionArgs, bloc
 	return result.Return(), result.Err
 }
 
-func workerDirect(ctx context.Context, s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
+func workerDirect(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
 	triangular := &pairtypes.ITriangularArbitrageTriangular{
 		Token0:  common.HexToAddress(triangle.Token0),
@@ -355,7 +354,7 @@ func workerDirect(ctx context.Context, s *BlockChainAPI, results chan<- interfac
 	return
 }
 
-func workerTest(ctx context.Context, s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
+func workerTest(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
 	triangular := &pairtypes.ITriangularArbitrageTriangular{
 		Token0:  common.HexToAddress(triangle.Token0),
@@ -463,7 +462,7 @@ func workerTest(ctx context.Context, s *BlockChainAPI, results chan<- interface{
 	return
 }
 
-func pairWorker(ctx context.Context, s *BlockChainAPI, results chan<- interface{}, triangle pairtypes.Triangle) {
+func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
 	triangular := &pairtypes.ITriangularArbitrageTriangular{
 		Token0:  common.HexToAddress(triangle.Token0),
@@ -494,7 +493,6 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan<- interface{
 		} else if stepSize == 1 {
 			point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
 			if point.Cmp(big.NewInt(0)) == 0 {
-				results <- nil
 				return
 			}
 			param.Start = point
@@ -515,7 +513,6 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan<- interface{
 		// 查询对应步长rois
 		rois, err = getRois(s, triangular, param, ctx)
 		if err != nil {
-			results <- err
 			return
 		}
 
@@ -525,7 +522,6 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan<- interface{
 	}
 
 	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
-		results <- nil
 		return
 	}
 
@@ -554,7 +550,6 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan<- interface{
 
 	calldata, err := EncodePackedBsc(parameters)
 	if err != nil {
-		results <- err
 		return
 	}
 
@@ -564,7 +559,9 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan<- interface{
 		Profit:   *rois[13],
 	}
 
-	results <- ROI
+	if _, open := <-results; open {
+		results <- ROI
+	}
 	return
 }
 
@@ -657,6 +654,8 @@ func (s *BlockChainAPI) CallBatch() (string, error) {
 			gas, err := s.EstimateGas(context.Background(), args, &LatestBlockNumber, nil)
 			if err != nil {
 				log.Error("存在roi的预估gas计算异常", "err", err)
+			} else if uint64(gas) > paircache.EsGasLimit {
+				log.Error("存在roi的预估gas超过限制", "EsGasLimit", paircache.EsGasLimit, "EsGas", uint64(gas))
 			} else {
 				newROI := roi.ROI{
 					ChainId:     paircache.ChainId,
@@ -681,6 +680,8 @@ func (s *BlockChainAPI) CallBatch() (string, error) {
 	return "ok", nil
 }
 
+var retryTriangles = make([]pairtypes.Triangle, 0)
+
 // PairCallBatch executes Call
 func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriangle) {
 	// 获取剩余处理时间，若剩余时间大于0，则继续
@@ -695,7 +696,7 @@ func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriang
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(restTime)*time.Millisecond)
 	defer cancel()
 	triangles := transferTriangle.Triangles
-	results := make(chan interface{}, len(triangles))
+	results := make(chan interface{}, len(triangles)+len(retryTriangles))
 	var cacheBlockNumber uint64
 
 Loop1:
@@ -759,6 +760,7 @@ Loop1:
 
 			// 计算预估总gas
 			var finalROIs []roi.ROI
+			retryTriangles = retryTriangles[:0]
 			for _, filteredROI := range filteredROIs {
 				decodeString, _ := hex.DecodeString(filteredROI.CallData)
 				bytes := hexutil.Bytes(decodeString)
@@ -766,6 +768,8 @@ Loop1:
 				gas, err := s.EstimateGas(context.Background(), args, &LatestBlockNumber, nil)
 				if err != nil {
 					log.Error("存在roi的预估gas计算异常", "err", err)
+				} else if uint64(gas) > paircache.EsGasLimit {
+					log.Error("存在roi的预估gas超过限制", "EsGasLimit", paircache.EsGasLimit, "EsGas", uint64(gas))
 				} else {
 					newROI := roi.ROI{
 						ChainId:     paircache.ChainId,
@@ -779,6 +783,7 @@ Loop1:
 						To:          paircache.ToStr,
 					}
 					finalROIs = append(finalROIs, newROI)
+					retryTriangles = append(retryTriangles, filteredROI.Triangle)
 				}
 			}
 			if len(finalROIs) > 0 {
@@ -790,17 +795,43 @@ Loop1:
 	}()
 
 	// 提交任务到协程池，判断如果当前时间超过处理限制时间则后续任务不提交，提交的任务的协程由上面的超时上下文来控制结束
-	var wg sync.WaitGroup
-	for _, triangle := range triangles {
-		timeDiff := time.Now().Sub(*blockTime).Milliseconds()
-		if timeDiff > paircache.PairCallDeadline {
-			break
+	// 如果重试triangle不为空，优先单独执行
+Loop3:
+	for _, retryTriangle := range retryTriangles {
+		select {
+		case <-ctx.Done():
+			// 超时后停止提交任务
+			break Loop3
+		default:
+			SubmitCall(ctx, s, results, retryTriangle)
 		}
-		wg.Add(1)
-		SubmitCall(ctx, &wg, s, results, triangle)
 	}
-	wg.Wait()
-	close(results)
+	paircache.IsOutPairCallDeadline(blockTime, "提交retryTriangles完成")
+
+	// 执行新获取的triangle
+Loop4:
+	for _, triangle := range triangles {
+		select {
+		case <-ctx.Done():
+			// 超时后停止提交任务
+			break Loop4
+		default:
+			SubmitCall(ctx, s, results, triangle)
+		}
+	}
+
+	// 等待超时释放资源
+Loop5:
+	for {
+		select {
+		case <-ctx.Done():
+			// 超时后停止
+			break Loop5
+		default:
+		}
+	}
+	paircache.IsOutPairCallDeadline(blockTime, "提交并等待newTriangles执行")
+
 }
 
 func GetEthCallData() ([]CallBatchArgs, error) {

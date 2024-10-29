@@ -1610,9 +1610,11 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 								// 更新缓存storage
 								for _, node := range set.Nodes {
 									if _, exists := storageCacheMap.Get(addr, node.Hash); exists {
-										storageCacheMap.Set(addr, node.Hash, common.BytesToHash(node.Blob))
-										log.Info("更新的storageCache", "node.Hash", node.Hash, "node.Blob", common.BytesToHash(node.Blob))
-
+										_, content, _, _ := rlp.Split(node.Blob)
+										var value common.Hash
+										value.SetBytes(content)
+										storageCacheMap.Set(addr, node.Hash, value)
+										log.Info("更新的storageCache", "key", node.Hash, "value", value)
 									}
 								}
 							}
@@ -1716,9 +1718,8 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 						rawdb.WriteCode(codeWriter, common.BytesToHash(obj.CodeHash()), obj.code)
 
 						// 更新缓存code
-						code := obj.code
-						copyCode := make([]byte, len(code))
-						copy(copyCode, code)
+						copyCode := make([]byte, len(obj.code))
+						copy(copyCode, obj.code)
 						objCache.code = copyCode
 						log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance)
 
