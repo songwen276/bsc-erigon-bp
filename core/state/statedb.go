@@ -1459,7 +1459,7 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 	}
 	for addr, prev := range s.stateObjectsDestruct {
 		// 新区块产生后更新storage数据缓存
-		storageCacheMap.DeleteAll(addr)
+		// storageCacheMap.DeleteAll(addr)
 
 		// The original account was non-existing, and it's marked as destructed
 		// in the scope of block. It can be case (a) or (b).
@@ -1607,16 +1607,18 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 								return
 							} else {
 								taskResults <- taskResult{nil, set}
+
 								// 更新缓存storage
-								for _, node := range set.Nodes {
-									if _, exists := storageCacheMap.Get(addr, node.Hash); exists {
-										_, content, _, _ := rlp.Split(node.Blob)
-										var value common.Hash
-										value.SetBytes(content)
-										storageCacheMap.Set(addr, node.Hash, value)
-										log.Info("更新的storageCache", "key", node.Hash, "value", value)
-									}
-								}
+								// for _, node := range set.Nodes {
+								// 	if _, exists := storageCacheMap.Get(addr, node.Hash); exists {
+								// 		_, content, _, _ := rlp.Split(node.Blob)
+								// 		var value common.Hash
+								// 		value.SetBytes(content)
+								// 		storageCacheMap.Set(addr, node.Hash, value)
+								// 		log.Info("更新的storageCache", "key", node.Hash, "value", value)
+								// 	}
+								// }
+
 							}
 						} else {
 							taskResults <- taskResult{nil, nil}
@@ -1707,21 +1709,23 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 			codeWriter := s.db.DiskDB().NewBatch()
 			for addr := range s.stateObjectsDirty {
 				if obj := s.stateObjects[addr]; !obj.deleted {
+
 					// 新区块产生后更新stateObjCacheMap
-					var objCache *stateObject
-					if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
-						objCache = objectCache.(*stateObject)
-						objCache.origin = obj.origin.Copy()
-					}
+					// var objCache *stateObject
+					// if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
+					// 	objCache = objectCache.(*stateObject)
+					// 	objCache.origin = obj.origin.Copy()
+					// }
+
 					// Write any contract code associated with the state object
 					if obj.code != nil && obj.dirtyCode {
 						rawdb.WriteCode(codeWriter, common.BytesToHash(obj.CodeHash()), obj.code)
 
 						// 更新缓存code
-						copyCode := make([]byte, len(obj.code))
-						copy(copyCode, obj.code)
-						objCache.code = copyCode
-						log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance)
+						// copyCode := make([]byte, len(obj.code))
+						// copy(copyCode, obj.code)
+						// objCache.code = copyCode
+						// log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance)
 
 						obj.dirtyCode = false
 						if s.snap != nil {
