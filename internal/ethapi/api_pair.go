@@ -760,7 +760,6 @@ Loop1:
 
 			// 计算预估总gas
 			var finalROIs []roi.ROI
-			retryTriangles = retryTriangles[:0]
 			for _, filteredROI := range filteredROIs {
 				decodeString, _ := hex.DecodeString(filteredROI.CallData)
 				bytes := hexutil.Bytes(decodeString)
@@ -796,17 +795,21 @@ Loop1:
 
 	// 提交任务到协程池，判断如果当前时间超过处理限制时间则后续任务不提交，提交的任务的协程由上面的超时上下文来控制结束
 	// 如果重试triangle不为空，优先单独执行
-Loop3:
-	for _, retryTriangle := range retryTriangles {
-		select {
-		case <-ctx.Done():
-			// 超时后停止提交任务
-			break Loop3
-		default:
-			SubmitCall(ctx, s, results, retryTriangle)
+	retryNum := len(retryTriangles)
+	if retryNum > 0 {
+	Loop3:
+		for _, retryTriangle := range retryTriangles {
+			select {
+			case <-ctx.Done():
+				// 超时后停止提交任务
+				break Loop3
+			default:
+				SubmitCall(ctx, s, results, retryTriangle)
+			}
 		}
+		paircache.IsOutPairCallDeadline(blockTime, "提交retryTriangles完成, 个数="+strconv.Itoa(retryNum))
+		retryTriangles = retryTriangles[:0]
 	}
-	paircache.IsOutPairCallDeadline(blockTime, "提交retryTriangles完成")
 
 	// 执行新获取的triangle
 Loop4:

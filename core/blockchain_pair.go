@@ -65,19 +65,19 @@ func pairCall(receipts types.Receipts, blockTime *time.Time, blockNumber uint64)
 		// log.Info("获取triangles信息成功", "triangles", triangles)
 		lenth := len(triangles)
 		if lenth > 0 {
-			if lenth <= paircache.TrianglefilterNum {
-				select {
-				case paircache.TriangleChannel <- &pairtypes.TransferTriangle{BlockNumber: blockNumber, BlockTime: blockTime, Triangles: triangles}:
-				default:
-					log.Warn("通道已满，直接跳过")
-				}
-			} else {
-				select {
-				case paircache.TriangleChannel <- &pairtypes.TransferTriangle{BlockNumber: blockNumber, BlockTime: blockTime, Triangles: paircache.SelectRandomElements(triangles, paircache.TrianglefilterNum)}:
-				default:
-					log.Warn("通道已满，直接跳过")
-				}
-			}
+			// if lenth <= paircache.TrianglefilterNum {
+			// 	select {
+			// 	case paircache.TriangleChannel <- &pairtypes.TransferTriangle{BlockNumber: blockNumber, BlockTime: blockTime, Triangles: triangles}:
+			// 	default:
+			// 		log.Warn("通道已满，直接跳过")
+			// 	}
+			// } else {
+			// 	select {
+			// 	case paircache.TriangleChannel <- &pairtypes.TransferTriangle{BlockNumber: blockNumber, BlockTime: blockTime, Triangles: paircache.SelectRandomElements(triangles, paircache.TrianglefilterNum)}:
+			// 	default:
+			// 		log.Warn("通道已满，直接跳过")
+			// 	}
+			// }
 			// 等待处理完成
 			// <-paircache.DoneChannel
 		}
