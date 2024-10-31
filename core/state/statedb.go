@@ -1837,7 +1837,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 			}
 
 			// obj.cacheCode是在前面合约code持久化到数据库后才标记为待更新缓存
-			if obj.code != nil && obj.cacheCode {
+			if obj.code != nil && obj.cacheCode && objCache != nil {
 				// 更新缓存code
 				copyCode := make([]byte, len(obj.code))
 				copy(copyCode, obj.code)
