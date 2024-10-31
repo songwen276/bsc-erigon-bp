@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	cmap "github.com/orcaman/concurrent-map"
-	"github.com/status-im/keycard-go/hexutils"
 	"runtime"
 	"sort"
 	"sync"
@@ -1539,8 +1538,6 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 		snapUpdated = make(chan struct{})
 	}
 
-	log.Info("s.snap ", "is nil", s.snap == nil, "s.pipeCommit", s.pipeCommit, "s.noTrie", s.noTrie)
-
 	commmitTrie := func() error {
 		commitErr := func() error {
 			if s.pipeCommit {
@@ -1823,18 +1820,18 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 			var objCache *stateObject
 			if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
 				objCache = objectCache.(*stateObject)
-				if i == 1 {
-					log.Info("原来的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
-				}
+				// if i == 1 {
+				// 	log.Info("原来的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
+				// }
 				// 由前面的obj.commit()方法可知，账户在当前区块有更新，解析区块后，该账户会生成s.trie，无更新则s.trie == nil，因此，
 				// 当s.trie == nil，直接将obj.data.Copy()赋值给objCache.origin，否则，将s.trie提交计算出账户状态更改后的状态
 				// root更新到obj.data.Root，再将obj.data.Copy()赋值给objCache.origin，其实在这里obj.data已经等于obj.origin
 				objCache.origin = obj.data.Copy()
 			}
-			if i == 1 && objCache != nil {
-				log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
-				i++
-			}
+			// if i == 1 && objCache != nil {
+			// 	log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
+			// 	i++
+			// }
 
 			// obj.cacheCode是在前面合约code持久化到数据库后才标记为待更新缓存
 			if obj.code != nil && obj.cacheCode && objCache != nil {
@@ -1851,6 +1848,10 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 						var value common.Hash
 						value.SetBytes(bytes)
 						storageCacheMap.Set(addr, hash, value)
+						if i == 1 {
+							log.Info("原来的storageCache", "addr", addr.Hex(), "storage.key", hash, "storage.value", value)
+							i++
+						}
 					}
 				}
 			}
