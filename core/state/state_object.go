@@ -80,6 +80,9 @@ type stateObject struct {
 	// Cache flags.
 	dirtyCode bool // true if the code was updated
 
+	// 与dirtyCode类似，主要用于合约code提交数据库持久化后dirtyCode=false，标记cacheCode=true用于后续更新缓存
+	cacheCode bool // true if the code was updated
+
 	// Flag whether the account was marked as self-destructed. The self-destructed account
 	// is still accessible in the scope of same transaction.
 	selfDestructed bool
@@ -229,6 +232,16 @@ func (s *storageCache) Get(addr common.Address, slot common.Hash) (common.Hash, 
 	return common.Hash{}, false
 }
 
+func (s *storageCache) GetSlotMap(addr common.Address) (map[common.Hash]common.Hash, bool) {
+	s.lock.RLock()         // 加读锁
+	defer s.lock.RUnlock() // 函数结束释放读锁
+
+	if slotMap, exists := s.cacheMap[addr]; exists {
+		return slotMap, true
+	}
+	return nil, false
+}
+
 // Set 设置指定地址和槽位的值
 func (s *storageCache) Set(addr common.Address, slot common.Hash, value common.Hash) {
 	s.lock.Lock()         // 加写锁
@@ -285,7 +298,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 
 	if s.db.Flag == 1 {
-		if storage, exists := storageCacheMap.Get(s.address, key); exists {
+		if storage, exists := storageCacheMap.Get(s.address, crypto.Keccak256Hash(key.Bytes())); exists {
 			s.setOriginStorage(key, storage)
 			return storage
 		}
@@ -540,6 +553,7 @@ func (s *stateObject) commit() (*trienode.NodeSet, error) {
 	// The trie is currently in an open state and could potentially contain
 	// cached mutations. Call commit to acquire a set of nodes that have been
 	// modified, the set can be nil if nothing to commit.
+	// stateObject中的trie是由账户的storage生成的树
 	root, nodes, err := s.trie.Commit(false)
 	if err != nil {
 		return nil, err

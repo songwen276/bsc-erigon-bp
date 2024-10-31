@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	cmap "github.com/orcaman/concurrent-map"
+	"github.com/status-im/keycard-go/hexutils"
 	"runtime"
 	"sort"
 	"sync"
@@ -1458,9 +1459,6 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 		return incomplete, nil
 	}
 	for addr, prev := range s.stateObjectsDestruct {
-		// 新区块产生后更新storage数据缓存
-		// storageCacheMap.DeleteAll(addr)
-
 		// The original account was non-existing, and it's marked as destructed
 		// in the scope of block. It can be case (a) or (b).
 		// - for (a), skip it without doing anything.
@@ -1609,13 +1607,21 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 								taskResults <- taskResult{nil, set}
 
 								// 更新缓存storage
-								// for _, node := range set.Nodes {
-								// 	if _, exists := storageCacheMap.Get(addr, node.Hash); exists {
-								// 		_, content, _, _ := rlp.Split(node.Blob)
-								// 		var value common.Hash
-								// 		value.SetBytes(content)
-								// 		storageCacheMap.Set(addr, node.Hash, value)
-								// 		log.Info("更新的storageCache", "key", node.Hash, "value", value)
+								// i := 1
+								// if set != nil {
+								// 	for _, node := range set.Nodes {
+								// 		if _, exists := storageCacheMap.Get(addr, node.Hash); exists {
+								// 			var content []byte
+								// 			rlp.DecodeBytes(node.Blob, content)
+								// 			// _, content, _, _ := rlp.Split(node.Blob)
+								// 			var value common.Hash
+								// 			value.SetBytes(content)
+								// 			storageCacheMap.Set(addr, node.Hash, value)
+								// 			if i == 1 {
+								// 				log.Info("更新的storageCache", "key", node.Hash, "value", value)
+								// 				i++
+								// 			}
+								// 		}
 								// 	}
 								// }
 
@@ -1638,6 +1644,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 				// that the account was destructed and then resurrected in the same block.
 				// In this case, the node set is shared by both accounts.
 				if res.nodeSet != nil {
+
 					if err := nodes.Merge(res.nodeSet); err != nil {
 						return err
 					}
@@ -1646,6 +1653,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 			close(finishCh)
 
 			if !s.noTrie {
+				// StateDB中的trie是由更改的账户信息生成的树
 				root, set, err := s.trie.Commit(true)
 				if err != nil {
 					return err
@@ -1709,24 +1717,10 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 			codeWriter := s.db.DiskDB().NewBatch()
 			for addr := range s.stateObjectsDirty {
 				if obj := s.stateObjects[addr]; !obj.deleted {
-
-					// 新区块产生后更新stateObjCacheMap
-					// var objCache *stateObject
-					// if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
-					// 	objCache = objectCache.(*stateObject)
-					// 	objCache.origin = obj.origin.Copy()
-					// }
-
 					// Write any contract code associated with the state object
 					if obj.code != nil && obj.dirtyCode {
 						rawdb.WriteCode(codeWriter, common.BytesToHash(obj.CodeHash()), obj.code)
-
-						// 更新缓存code
-						// copyCode := make([]byte, len(obj.code))
-						// copy(copyCode, obj.code)
-						// objCache.code = copyCode
-						// log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance)
-
+						obj.cacheCode = true
 						obj.dirtyCode = false
 						if s.snap != nil {
 							diffLayer.Codes = append(diffLayer.Codes, types.DiffCode{
@@ -1814,6 +1808,54 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	}
 	if root == (common.Hash{}) {
 		root = types.EmptyRootHash
+	}
+
+	// 删除已销毁账户的storage数据缓存
+	for addr, _ := range s.stateObjectsDestruct {
+		storageCacheMap.DeleteAll(addr)
+	}
+
+	// 更新账户信息及合约code
+	i := 1
+	for addr := range s.stateObjectsDirty {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			// 新区块产生后更新stateObjCacheMap
+			var objCache *stateObject
+			if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
+				objCache = objectCache.(*stateObject)
+				if i == 1 {
+					log.Info("原来的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
+				}
+				// 由前面的obj.commit()方法可知，账户在当前区块有更新，解析区块后，该账户会生成s.trie，无更新则s.trie == nil，因此，
+				// 当s.trie == nil，直接将obj.data.Copy()赋值给objCache.origin，否则，将s.trie提交计算出账户状态更改后的状态
+				// root更新到obj.data.Root，再将obj.data.Copy()赋值给objCache.origin，其实在这里obj.data已经等于obj.origin
+				objCache.origin = obj.data.Copy()
+			}
+			if i == 1 {
+				log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
+				i++
+			}
+
+			// obj.cacheCode是在前面合约code持久化到数据库后才标记为待更新缓存
+			if obj.code != nil && obj.cacheCode {
+				// 更新缓存code
+				copyCode := make([]byte, len(obj.code))
+				copy(copyCode, obj.code)
+				objCache.code = copyCode
+			}
+
+			// 更新账户的storage数据缓存
+			if _, exists := storageCacheMap.GetSlotMap(addr); exists {
+				if storage, exists := s.storages[crypto.Keccak256Hash(addr[:])]; exists {
+					for hash, bytes := range storage {
+						var value common.Hash
+						value.SetBytes(bytes)
+						storageCacheMap.Set(addr, hash, value)
+					}
+				}
+			}
+
+		}
 	}
 
 	// Clear all internal flags at the end of commit operation.
