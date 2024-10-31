@@ -208,6 +208,13 @@ func SubmitCall(ctx context.Context, s *BlockChainAPI, results chan interface{},
 	})
 }
 
+func SubmitCallAndReturn(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
+	gopool.Submit(func() {
+		wg.Done()
+		pairWorker(ctx, s, results, triangle)
+	})
+}
+
 func FlagDoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, blockOverrides *BlockOverrides, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
@@ -797,6 +804,7 @@ Loop1:
 	// 如果重试triangle不为空，优先单独执行
 	retryNum := len(retryTriangles)
 	if retryNum > 0 {
+		var wg sync.WaitGroup
 	Loop3:
 		for _, retryTriangle := range retryTriangles {
 			select {
@@ -804,9 +812,11 @@ Loop1:
 				// 超时后停止提交任务
 				break Loop3
 			default:
-				SubmitCall(ctx, s, results, retryTriangle)
+				wg.Add(1)
+				SubmitCallAndReturn(ctx, &wg, s, results, retryTriangle)
 			}
 		}
+		wg.Wait()
 		paircache.IsOutPairCallDeadline(blockTime, "提交retryTriangles完成, 个数="+strconv.Itoa(retryNum))
 		retryTriangles = retryTriangles[:0]
 	}
