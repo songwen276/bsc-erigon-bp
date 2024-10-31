@@ -1831,7 +1831,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 				// root更新到obj.data.Root，再将obj.data.Copy()赋值给objCache.origin，其实在这里obj.data已经等于obj.origin
 				objCache.origin = obj.data.Copy()
 			}
-			if i == 1 {
+			if i == 1 && objCache != nil {
 				log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
 				i++
 			}
