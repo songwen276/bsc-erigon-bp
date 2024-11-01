@@ -211,18 +211,18 @@ var storageCacheMap = NewStorageCacheMap()
 
 type storageCache struct {
 	lock     sync.RWMutex
-	cacheMap map[common.Address]map[common.Hash]common.Hash
+	cacheMap map[common.Hash]map[common.Hash]common.Hash
 }
 
 // NewStorageCacheMap 初始化一个空的 storageCacheMap
 func NewStorageCacheMap() *storageCache {
 	return &storageCache{
-		cacheMap: make(map[common.Address]map[common.Hash]common.Hash),
+		cacheMap: make(map[common.Hash]map[common.Hash]common.Hash),
 	}
 }
 
 // Get 获取指定地址和槽位的值
-func (s *storageCache) Get(addr common.Address, slot common.Hash) (common.Hash, bool) {
+func (s *storageCache) Get(addr common.Hash, slot common.Hash) (common.Hash, bool) {
 	s.lock.RLock()         // 加读锁
 	defer s.lock.RUnlock() // 函数结束释放读锁
 
@@ -233,7 +233,7 @@ func (s *storageCache) Get(addr common.Address, slot common.Hash) (common.Hash, 
 	return common.Hash{}, false
 }
 
-func (s *storageCache) GetSlotMap(addr common.Address) (map[common.Hash]common.Hash, bool) {
+func (s *storageCache) GetSlotMap(addr common.Hash) (map[common.Hash]common.Hash, bool) {
 	s.lock.RLock()         // 加读锁
 	defer s.lock.RUnlock() // 函数结束释放读锁
 
@@ -244,7 +244,7 @@ func (s *storageCache) GetSlotMap(addr common.Address) (map[common.Hash]common.H
 }
 
 // Set 设置指定地址和槽位的值
-func (s *storageCache) Set(addr common.Address, slot common.Hash, value common.Hash) {
+func (s *storageCache) Set(addr common.Hash, slot common.Hash, value common.Hash) {
 	s.lock.Lock()         // 加写锁
 	defer s.lock.Unlock() // 函数结束释放写锁
 
@@ -256,7 +256,7 @@ func (s *storageCache) Set(addr common.Address, slot common.Hash, value common.H
 }
 
 // Delete 删除指定地址和槽位的值
-func (s *storageCache) Delete(addr common.Address, slot common.Hash) {
+func (s *storageCache) Delete(addr common.Hash, slot common.Hash) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -269,7 +269,7 @@ func (s *storageCache) Delete(addr common.Address, slot common.Hash) {
 }
 
 // Delete 删除指定地址的所有槽位
-func (s *storageCache) DeleteAll(addr common.Address) {
+func (s *storageCache) DeleteAll(addr common.Hash) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -300,10 +300,11 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		return common.Hash{}
 	}
 
+	storageKey := crypto.Keccak256Hash(key.Bytes())
 	if s.db.Flag == 1 {
-		if storage, exists := storageCacheMap.Get(s.address, crypto.Keccak256Hash(key.Bytes())); exists {
-			s.setOriginStorage(key, storage)
-			return storage
+		if storageValue, exists := storageCacheMap.Get(s.addrHash, storageKey); exists {
+			s.setOriginStorage(key, storageValue)
+			return storageValue
 		}
 	}
 
@@ -316,7 +317,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 
 	if s.db.snap != nil {
 		start := time.Now()
-		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+		enc, err = s.db.snap.Storage(s.addrHash, storageKey)
 		if metrics.EnabledExpensive {
 			s.db.SnapshotStorageReads += time.Since(start)
 		}
@@ -350,11 +351,12 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	s.setOriginStorage(key, value)
 
 	if logtest == 1 {
-		log.Info("数据库查询的Storage", "key", key, "value", value)
+		log.Info("数据库查询的Storage", "addr", s.addrHash, "key", storageKey, "value", value)
+		logtest++
 	}
 
 	if s.db.Flag == 1 {
-		storageCacheMap.Set(s.address, key, value)
+		storageCacheMap.Set(s.addrHash, storageKey, value)
 	}
 
 	return value

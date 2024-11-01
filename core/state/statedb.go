@@ -1809,7 +1809,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 	// 删除已销毁账户的storage数据缓存
 	for addr, _ := range s.stateObjectsDestruct {
-		storageCacheMap.DeleteAll(addr)
+		storageCacheMap.DeleteAll(crypto.Keccak256Hash(addr[:]))
 	}
 
 	// 更新账户信息及合约code
@@ -1842,12 +1842,13 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 			}
 
 			// 更新账户的storage数据缓存
-			if _, exists := storageCacheMap.GetSlotMap(addr); exists {
-				if storage, exists := s.storages[crypto.Keccak256Hash(addr[:])]; exists {
+			addHash := crypto.Keccak256Hash(addr[:])
+			if _, exists := storageCacheMap.GetSlotMap(addHash); exists {
+				if storage, found := s.storages[addHash]; found {
 					for hash, bytes := range storage {
 						var value common.Hash
 						value.SetBytes(bytes)
-						storageCacheMap.Set(addr, hash, value)
+						storageCacheMap.Set(addHash, hash, value)
 						// if i == 1 {
 						// 	log.Info("原来的storageCache", "addr", addr.Hex(), "storage.key", hash, "storage.value", value)
 						// 	i++
