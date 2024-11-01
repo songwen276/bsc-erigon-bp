@@ -528,6 +528,8 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		}
 	}
 
+	log.Info("步长1查询完成后", "rois", rois)
+
 	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
 		return
 	}
