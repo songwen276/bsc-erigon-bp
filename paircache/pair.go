@@ -153,6 +153,8 @@ func timerGetDynamicConfig() {
 
 func fetchDynamicConfig() {
 	// 发送GET请求，获取最新的配置信息
+	log.Info("开始刷新动态配置")
+	start := time.Now()
 	resp, err := http.Get(ConfigItemUrl)
 	if err != nil {
 		log.Error("http请求配置url失败", "err", err)
@@ -225,6 +227,8 @@ func fetchDynamicConfig() {
 		pairCache.TopicMap = newTopicMap
 		// log.Info("刷新内存中topic成功", "topic总数", len(newTopicMap))
 	}
+
+	log.Info("刷新动态配置完成", "time", time.Since(start))
 }
 
 func fetchTriangleMap() {
