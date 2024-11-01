@@ -520,6 +520,7 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		// 查询对应步长rois
 		rois, err = getRois(s, triangular, param, ctx)
 		if err != nil {
+			log.Info("查询rois失败", "err", err)
 			return
 		}
 
@@ -527,8 +528,6 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 			index = resolveROI(rois)
 		}
 	}
-
-	log.Info("步长1查询完成后", "rois", rois)
 
 	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
 		return
