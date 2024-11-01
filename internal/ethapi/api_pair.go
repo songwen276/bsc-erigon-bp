@@ -566,9 +566,14 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		Profit:   *rois[13],
 	}
 
-	if _, open := <-results; open {
+	// 上下文超时取消后直接返回，不再插入数据到结果通道
+	select {
+	case <-ctx.Done():
+		return
+	default:
 		results <- ROI
 	}
+
 	return
 }
 
