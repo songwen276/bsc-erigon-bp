@@ -153,8 +153,6 @@ func timerGetDynamicConfig() {
 
 func fetchDynamicConfig() {
 	// 发送GET请求，获取最新的配置信息
-	log.Info("开始加载动态配置")
-	start := time.Now()
 	resp, err := http.Get(ConfigItemUrl)
 	if err != nil {
 		log.Error("http请求配置url失败", "err", err)
@@ -180,43 +178,43 @@ func fetchDynamicConfig() {
 	}
 
 	// 打印解析后的结果
-	log.Info("解析配置数据成功", "config-item", result)
+	// log.Info("解析配置数据成功", "config-item", result)
 
 	// 获取特定的键值对
 	if isOpen, ok := result["open"].(bool); ok {
 		PairCallSwitch = isOpen
-		log.Info("刷新内存中pairCallSwitch成功", "pairCallSwitch", PairCallSwitch)
+		// log.Info("刷新内存中pairCallSwitch成功", "pairCallSwitch", PairCallSwitch)
 	}
 
 	if triangleCount, ok := result["triangleCount"].(float64); ok {
 		TrianglefilterNum = int(triangleCount)
-		log.Info("刷新内存中TrianglefilterNum成功", "trianglefilterNum", TrianglefilterNum)
+		// log.Info("刷新内存中TrianglefilterNum成功", "trianglefilterNum", TrianglefilterNum)
 	}
 
 	if threadTtl, ok := result["threadTtl"].(float64); ok {
 		PairCallTimeout = int(threadTtl)
-		log.Info("刷新内存中PairCallTimeout成功", "pairCallTimeout", PairCallTimeout)
+		// log.Info("刷新内存中PairCallTimeout成功", "pairCallTimeout", PairCallTimeout)
 	}
 
 	if pairCallDeadline, ok := result["deadline"].(float64); ok {
 		PairCallDeadline = int64(pairCallDeadline)
-		log.Info("刷新内存中PairCallDeadline成功", "pairCallDeadline", PairCallDeadline)
+		// log.Info("刷新内存中PairCallDeadline成功", "pairCallDeadline", PairCallDeadline)
 	}
 
 	if mevServiceUrl, ok := result["mevServiceUrl"].(string); ok {
 		MevServiceUrl = mevServiceUrl
-		log.Info("刷新内存中mevServiceUrl成功", "mevServiceUrl", MevServiceUrl)
+		// log.Info("刷新内存中mevServiceUrl成功", "mevServiceUrl", MevServiceUrl)
 	}
 
 	if profitThreshold, ok := result["profitThreshold"].(float64); ok {
 		ProfitThreshold = int64(profitThreshold)
-		log.Info("刷新内存中profitThreshold成功", "profitThreshold", ProfitThreshold)
+		// log.Info("刷新内存中profitThreshold成功", "profitThreshold", ProfitThreshold)
 	}
 
 	if contracts, ok := result["contracts"].(string); ok {
 		ToStr = contracts
 		To = common.HexToAddress(contracts)
-		log.Info("刷新内存中三角合约地址成功", "contracts address", To)
+		// log.Info("刷新内存中三角合约地址成功", "contracts address", To)
 	}
 
 	if topics, ok := result["topics"].(map[string]interface{}); ok {
@@ -225,9 +223,8 @@ func fetchDynamicConfig() {
 			newTopicMap[key] = value.(string)
 		}
 		pairCache.TopicMap = newTopicMap
-		log.Info("刷新内存中topic成功", "topic总数", len(newTopicMap))
+		// log.Info("刷新内存中topic成功", "topic总数", len(newTopicMap))
 	}
-	log.Info("加载动态配置完成", "time", time.Since(start))
 }
 
 func fetchTriangleMap() {

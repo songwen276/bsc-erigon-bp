@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"io"
 	"sync"
 	"time"
@@ -276,6 +277,8 @@ func (s *storageCache) DeleteAll(addr common.Address) {
 	delete(s.cacheMap, addr)
 }
 
+var logtest = 1
+
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	// If we have a pending write or clean cached, return that
@@ -345,6 +348,10 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		value.SetBytes(val)
 	}
 	s.setOriginStorage(key, value)
+
+	if logtest == 1 {
+		log.Info("数据库查询的Storage", "key", key, "value", value)
+	}
 
 	if s.db.Flag == 1 {
 		storageCacheMap.Set(s.address, key, value)
