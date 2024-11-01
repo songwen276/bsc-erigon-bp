@@ -57,14 +57,12 @@ func ProcessTriangle(pairAPI pairtypes.PairAPI) {
 
 func InitPairCache() {
 	// 初始化triange到内存
-	triangleStart := time.Now()
+	printMemUsed()
 	fetchTriangleMap()
-	log.Info("初次加载triange到内存中成功", "耗时", time.Since(triangleStart), "triange总数", pairCache.TriangleMapSize(), "解析pair总数", pairCache.PairTriangleIdSetMapSize())
+	printMemUsed()
 
 	// 初始化topic到内存
-	configStart := time.Now()
 	fetchDynamicConfig()
-	log.Info("初次加载动态配置成功到内存中成功", "耗时", time.Since(configStart))
 
 	// 开启协程周期更新内存中triange与topic
 	err := gopool.Submit(timerGetTriangle)
@@ -153,7 +151,6 @@ func timerGetDynamicConfig() {
 
 func fetchDynamicConfig() {
 	// 发送GET请求，获取最新的配置信息
-	log.Info("开始刷新动态配置")
 	start := time.Now()
 	resp, err := http.Get(ConfigItemUrl)
 	if err != nil {
@@ -233,7 +230,6 @@ func fetchDynamicConfig() {
 
 func fetchTriangleMap() {
 	// 初始化数据库连接
-	printMemUsed()
 	start := time.Now()
 	mysqlDB := mysqldb.GetMysqlDB()
 
@@ -275,7 +271,6 @@ func fetchTriangleMap() {
 		log.Error("查询失败", "err", err)
 	}
 	log.Info("刷新内存中triange耗时", "time", time.Since(start), "triange总数", pairCache.TriangleMapSize(), "pair总数", pairCache.PairTriangleIdSetMapSize(), "集群id", ClusterId, "集群总数", ClusterTotal)
-	printMemUsed()
 }
 
 func printMemUsed() {
