@@ -726,6 +726,8 @@ Loop1:
 		}
 	}
 
+	paircache.IsOutPairCallDeadline(blockTime, "缓存区块号=最新区块号或超时"+strconv.Itoa(int(cacheBlockNumber)))
+
 	// 开启一个协程监听结果通道，当有结果时将其添加到切片中，并在超过处理时间限制后，对切片中的结果进行处理
 	go func() {
 		rois := make([]ROI, 0, 5000)
