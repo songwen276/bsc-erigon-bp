@@ -522,13 +522,13 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		if err != nil {
 			return
 		}
-		log.Info("查询rois成功", "stepSize", stepSize, "rois", rois)
 
 		if stepSize != 1 {
 			index = resolveROI(rois)
 		}
 	}
 
+	log.Info("查询rois成功", "rois", rois)
 	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
 		return
 	}
