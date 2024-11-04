@@ -724,18 +724,18 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 
 	// StateDB自己本身无缓存时，在从公共的缓存中获取，如果存在则将其复制成新的实例更新到StateDB中
 	// 复制实例主要是避免线程安全问题，不同线程不同的StateDB操作各自不同的stateObject，可以将stateObjectCacheMap理解成另一个数据库
-	if s.Flag == 1 {
-		if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
-			objCache := objectCache.(*stateObject)
-			object := newObject(s, addr, objCache.origin.Copy())
-			code := objCache.code
-			copyCode := make([]byte, len(code))
-			copy(copyCode, code)
-			object.code = copyCode
-			s.setStateObject(object)
-			return object
-		}
-	}
+	// if s.Flag == 1 {
+	// 	if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
+	// 		objCache := objectCache.(*stateObject)
+	// 		object := newObject(s, addr, objCache.origin.Copy())
+	// 		code := objCache.code
+	// 		copyCode := make([]byte, len(code))
+	// 		copy(copyCode, code)
+	// 		object.code = copyCode
+	// 		s.setStateObject(object)
+	// 		return object
+	// 	}
+	// }
 
 	// If no live objects are available, attempt to use snapshots
 	var data *types.StateAccount
@@ -792,14 +792,14 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	obj := newObject(s, addr, data)
 	s.setStateObject(obj)
 
-	if s.Flag == 1 {
-		objectCache := newObject(nil, addr, data.Copy())
-		code := obj.Code()
-		copyCode := make([]byte, len(code))
-		copy(copyCode, code)
-		objectCache.code = copyCode
-		stateObjCacheMap.Set(addr.Hex(), objectCache)
-	}
+	// if s.Flag == 1 {
+	// 	objectCache := newObject(nil, addr, data.Copy())
+	// 	code := obj.Code()
+	// 	copyCode := make([]byte, len(code))
+	// 	copy(copyCode, code)
+	// 	objectCache.code = copyCode
+	// 	stateObjCacheMap.Set(addr.Hex(), objectCache)
+	// }
 
 	return obj
 }
