@@ -301,12 +301,12 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 
 	storageKey := crypto.Keccak256Hash(key.Bytes())
-	// if s.db.Flag == 1 {
-	// 	if storageValue, exists := storageCacheMap.Get(s.addrHash, storageKey); exists {
-	// 		s.setOriginStorage(key, storageValue)
-	// 		return storageValue
-	// 	}
-	// }
+	if s.db.Flag == 1 {
+		if storageValue, exists := storageCacheMap.Get(s.addrHash, key); exists {
+			s.setOriginStorage(key, storageValue)
+			return storageValue
+		}
+	}
 
 	// If no live objects are available, attempt to use snapshots
 	var (
@@ -355,9 +355,9 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		logtest++
 	}
 
-	// if s.db.Flag == 1 {
-	// 	storageCacheMap.Set(s.addrHash, storageKey, value)
-	// }
+	if s.db.Flag == 1 {
+		storageCacheMap.Set(s.addrHash, key, value)
+	}
 
 	return value
 }

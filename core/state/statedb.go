@@ -724,18 +724,17 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 
 	// StateDB自己本身无缓存时，在从公共的缓存中获取，如果存在则将其复制成新的实例更新到StateDB中
 	// 复制实例主要是避免线程安全问题，不同线程不同的StateDB操作各自不同的stateObject，可以将stateObjectCacheMap理解成另一个数据库
-	// if s.Flag == 1 {
-	// 	if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
-	// 		objCache := objectCache.(*stateObject)
-	// 		object := newObject(s, addr, objCache.origin.Copy())
-	// 		code := objCache.code
-	// 		copyCode := make([]byte, len(code))
-	// 		copy(copyCode, code)
-	// 		object.code = copyCode
-	// 		s.setStateObject(object)
-	// 		return object
-	// 	}
-	// }
+	if s.Flag == 1 {
+		if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
+			objCache := objectCache.(*stateObject)
+			object := newObject(s, addr, objCache.origin.Copy())
+			copyCode := make([]byte, len(objCache.code))
+			copy(copyCode, objCache.code)
+			object.code = copyCode
+			s.setStateObject(object)
+			return object
+		}
+	}
 
 	// If no live objects are available, attempt to use snapshots
 	var data *types.StateAccount
@@ -792,14 +791,14 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	obj := newObject(s, addr, data)
 	s.setStateObject(obj)
 
-	// if s.Flag == 1 {
-	// 	objectCache := newObject(nil, addr, data.Copy())
-	// 	code := obj.Code()
-	// 	copyCode := make([]byte, len(code))
-	// 	copy(copyCode, code)
-	// 	objectCache.code = copyCode
-	// 	stateObjCacheMap.Set(addr.Hex(), objectCache)
-	// }
+	if s.Flag == 1 {
+		objectCache := newObject(nil, addr, data.Copy())
+		code := obj.Code()
+		copyCode := make([]byte, len(code))
+		copy(copyCode, code)
+		objectCache.code = copyCode
+		stateObjCacheMap.Set(addr.Hex(), objectCache)
+	}
 
 	return obj
 }
@@ -1602,26 +1601,6 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 								return
 							} else {
 								taskResults <- taskResult{nil, set}
-
-								// 更新缓存storage
-								// i := 1
-								// if set != nil {
-								// 	for _, node := range set.Nodes {
-								// 		if _, exists := storageCacheMap.Get(addr, node.Hash); exists {
-								// 			var content []byte
-								// 			rlp.DecodeBytes(node.Blob, content)
-								// 			// _, content, _, _ := rlp.Split(node.Blob)
-								// 			var value common.Hash
-								// 			value.SetBytes(content)
-								// 			storageCacheMap.Set(addr, node.Hash, value)
-								// 			if i == 1 {
-								// 				log.Info("更新的storageCache", "key", node.Hash, "value", value)
-								// 				i++
-								// 			}
-								// 		}
-								// 	}
-								// }
-
 							}
 						} else {
 							taskResults <- taskResult{nil, nil}
@@ -1641,7 +1620,6 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 				// that the account was destructed and then resurrected in the same block.
 				// In this case, the node set is shared by both accounts.
 				if res.nodeSet != nil {
-
 					if err := nodes.Merge(res.nodeSet); err != nil {
 						return err
 					}
@@ -1842,18 +1820,13 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 			}
 
 			// 更新账户的storage数据缓存
-			addHash := crypto.Keccak256Hash(addr[:])
-			if _, exists := storageCacheMap.GetSlotMap(addHash); exists {
-				if storage, found := s.storages[addHash]; found {
-					for hash, bytes := range storage {
-						var value common.Hash
-						value.SetBytes(bytes)
-						storageCacheMap.Set(addHash, hash, value)
-						// if i == 1 {
-						// 	log.Info("原来的storageCache", "addr", addr.Hex(), "storage.key", hash, "storage.value", value)
-						// 	i++
-						// }
-					}
+			if _, exists := storageCacheMap.GetSlotMap(obj.addrHash); exists {
+				for key, value := range obj.pendingStorage {
+					storageCacheMap.Set(obj.addrHash, key, value)
+					// if i == 1 {
+					// 	log.Info("原来的storageCache", "addr", addr.Hex(), "storage.key", hash, "storage.value", value)
+					// 	i++
+					// }
 				}
 			}
 

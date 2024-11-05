@@ -664,7 +664,7 @@ func (s *BlockChainAPI) CallBatch() (string, error) {
 			decodeString, _ := hex.DecodeString(filteredROI.CallData)
 			bytes := hexutil.Bytes(decodeString)
 			args := TransactionArgs{From: &paircache.From, To: &paircache.To, Data: &bytes}
-			gas, err := s.EstimateGas(context.Background(), args, &LatestBlockNumber, nil)
+			gas, err := s.EstimateGas(context.Background(), args, nil, nil)
 			if err != nil {
 				log.Error("存在roi的预估gas计算异常", "err", err)
 			} else if uint64(gas) > paircache.EsGasLimit {
@@ -778,7 +778,7 @@ Loop1:
 				decodeString, _ := hex.DecodeString(filteredROI.CallData)
 				bytes := hexutil.Bytes(decodeString)
 				args := TransactionArgs{From: &paircache.From, To: &paircache.To, Data: &bytes}
-				gas, err := s.EstimateGas(context.Background(), args, &LatestBlockNumber, nil)
+				gas, err := s.EstimateGas(context.Background(), args, nil, nil)
 				if err != nil {
 					log.Error("存在roi的预估gas计算异常", "err", err)
 				} else if uint64(gas) > paircache.EsGasLimit {
