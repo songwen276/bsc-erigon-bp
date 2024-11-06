@@ -351,7 +351,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	s.setOriginStorage(key, value)
 
 	if logtest == 1 {
-		log.Info("数据库查询的Storage", "addr", s.addrHash, "key", storageKey, "value", value)
+		log.Info("数据库查询的Storage", "addr", s.addrHash, "storageKey", storageKey, "key", key, "value", value)
 		logtest++
 	}
 
