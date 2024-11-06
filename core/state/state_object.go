@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"io"
 	"sync"
 	"time"
@@ -277,8 +276,6 @@ func (s *storageCache) DeleteAll(addr common.Hash) {
 	delete(s.cacheMap, addr)
 }
 
-var logtest = 1
-
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	// If we have a pending write or clean cached, return that
@@ -300,20 +297,20 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		return common.Hash{}
 	}
 
-	storageKey := crypto.Keccak256Hash(key.Bytes())
-	// if s.db.Flag == 1 {
-	// 	if storageValue, exists := storageCacheMap.Get(s.addrHash, key); exists {
-	// 		s.setOriginStorage(key, storageValue)
-	// 		return storageValue
-	// 	}
-	// }
-
 	// If no live objects are available, attempt to use snapshots
 	var (
 		enc   []byte
 		err   error
 		value common.Hash
 	)
+
+	storageKey := crypto.Keccak256Hash(key.Bytes())
+	if s.db.Flag == 1 {
+		if storageValue, exists := storageCacheMap.Get(s.addrHash, storageKey); exists {
+			s.setOriginStorage(key, storageValue)
+			return storageValue
+		}
+	}
 
 	if s.db.snap != nil {
 		start := time.Now()
@@ -350,14 +347,9 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 	s.setOriginStorage(key, value)
 
-	if logtest == 1 {
-		log.Info("数据库查询的Storage", "addr", s.addrHash, "storageKey", storageKey, "key", key, "value", value)
-		logtest++
+	if s.db.Flag == 1 {
+		storageCacheMap.Set(s.addrHash, storageKey, value)
 	}
-
-	// if s.db.Flag == 1 {
-	// 	storageCacheMap.Set(s.addrHash, key, value)
-	// }
 
 	return value
 }

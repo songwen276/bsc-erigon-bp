@@ -19,6 +19,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -171,6 +172,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	if config.IsByzantium(blockNumber) {
 		statedb.Finalise(true)
 	} else {
+		log.Info("applyTransaction-IntermediateRoot")
 		root = statedb.IntermediateRoot(config.IsEIP158(blockNumber)).Bytes()
 	}
 	*usedGas += result.UsedGas
