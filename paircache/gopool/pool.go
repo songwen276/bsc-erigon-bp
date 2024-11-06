@@ -7,7 +7,7 @@ import (
 
 var (
 	// Init a instance pool when importing ants.
-	defaultPool, _ = ants.NewPool(10, ants.WithExpiryDuration(10*time.Second))
+	defaultPool, _ = ants.NewPool(1000, ants.WithExpiryDuration(5*time.Second))
 )
 
 // Logger is used for logging formatted messages.

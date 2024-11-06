@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/paircache"
+	pairpool "github.com/ethereum/go-ethereum/paircache/gopool"
 	"github.com/ethereum/go-ethereum/paircache/pairtypes"
 	"github.com/ethereum/go-ethereum/paircache/roi"
 	solsha3 "github.com/miguelmota/go-solidity-sha3"
@@ -196,20 +196,20 @@ func directResolveIndex(s *BlockChainAPI, triangular *pairtypes.ITriangularArbit
 }
 
 func SubmitTestCall(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
-	gopool.Submit(func() {
+	pairpool.Submit(func() {
 		defer wg.Done()
 		workerTest(ctx, s, results, triangle)
 	})
 }
 
 func SubmitCall(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
-	gopool.Submit(func() {
+	pairpool.Submit(func() {
 		pairWorker(ctx, s, results, triangle)
 	})
 }
 
 func SubmitCallAndReturn(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
-	gopool.Submit(func() {
+	pairpool.Submit(func() {
 		wg.Done()
 		pairWorker(ctx, s, results, triangle)
 	})
@@ -705,41 +705,31 @@ func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriang
 		return
 	}
 
-	// 根据剩余时间设置超时上下文，初始化参数
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(restTime)*time.Millisecond)
+	// 根据剩余时间设置超时上下文，设置定时器
+	timeout := time.Duration(restTime) * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	// 初始化参数
 	triangles := transferTriangle.Triangles
 	results := make(chan interface{}, len(triangles)+len(retryTriangles))
 	var cacheBlockNumber uint64
 
-Loop1:
-	for {
-		select {
-		case <-ctx.Done():
-			// 超时后停止
-			return
-		default:
-			cacheBlockNumber = uint64(s.BlockNumber())
-			if cacheBlockNumber == transferTriangle.BlockNumber {
-				paircache.IsOutPairCallDeadline(blockTime, "缓存区块号=最新区块号="+strconv.Itoa(int(cacheBlockNumber)))
-				break Loop1
-			}
-		}
-	}
-
 	// 开启一个协程监听结果通道，当有结果时将其添加到切片中，并在超过处理时间限制后，对切片中的结果进行处理
 	go func() {
 		rois := make([]ROI, 0, 5000)
-	Loop2:
+	Loop1:
 		for {
 			select {
 			case result := <-results:
 				if roi, ok := result.(*ROI); ok {
 					rois = append(rois, *roi)
 				}
+			case <-time.After(timeout):
+				break Loop1
 			case <-ctx.Done():
 				// 超时后停止读取
-				break Loop2
+				break Loop1
 			}
 		}
 		roiLen := len(rois)
@@ -806,6 +796,21 @@ Loop1:
 		}
 
 	}()
+
+Loop2:
+	for {
+		select {
+		case <-ctx.Done():
+			// 超时后停止
+			return
+		default:
+			cacheBlockNumber = uint64(s.BlockNumber())
+			if cacheBlockNumber == transferTriangle.BlockNumber {
+				paircache.IsOutPairCallDeadline(blockTime, "缓存区块号=最新区块号="+strconv.Itoa(int(cacheBlockNumber)))
+				break Loop2
+			}
+		}
+	}
 
 	// 提交任务到协程池，判断如果当前时间超过处理限制时间则后续任务不提交，提交的任务的协程由上面的超时上下文来控制结束
 	// 如果重试triangle不为空，优先单独执行
