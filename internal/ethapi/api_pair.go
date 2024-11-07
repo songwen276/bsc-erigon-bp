@@ -725,8 +725,6 @@ func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriang
 				if roi, ok := result.(*ROI); ok {
 					rois = append(rois, *roi)
 				}
-			case <-time.After(timeout):
-				break Loop1
 			case <-ctx.Done():
 				// 超时后停止读取
 				break Loop1
@@ -789,7 +787,8 @@ func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriang
 					retryTriangles = append(retryTriangles, filteredROI.Triangle)
 				}
 			}
-			if len(finalROIs) > 0 {
+
+			if len(finalROIs) > 0 && time.Now().Sub(*blockTime).Milliseconds() < 2700 {
 				roi.SendRois(finalROIs)
 				paircache.IsOutPairCallDeadline(blockTime, "eth_call查询结果发送处理完成")
 			}
