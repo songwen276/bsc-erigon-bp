@@ -788,7 +788,7 @@ func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriang
 				}
 			}
 
-			if len(finalROIs) > 0 && time.Now().Sub(*blockTime).Milliseconds() < 2700 {
+			if len(finalROIs) > 0 && time.Now().Sub(*blockTime).Milliseconds() < paircache.PairCallDeadline+200 {
 				roi.SendRois(finalROIs)
 				paircache.IsOutPairCallDeadline(blockTime, "eth_call查询结果发送处理完成")
 			}
