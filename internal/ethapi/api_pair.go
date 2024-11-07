@@ -728,6 +728,7 @@ func (s *BlockChainAPI) PairCallBatch(transferTriangle *pairtypes.TransferTriang
 			case <-ctx.Done():
 				// 超时后停止读取
 				break Loop1
+			default:
 			}
 		}
 		roiLen := len(rois)
