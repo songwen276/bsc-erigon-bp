@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -469,6 +470,13 @@ func workerTest(ctx context.Context, s *BlockChainAPI, results chan interface{},
 	return
 }
 
+var stepZeroNum uint32 = 0
+var getRoisErrNum uint32 = 0
+var overProfitThresholdNum uint32 = 0
+var encodeErrNum uint32 = 0
+var cancelNum uint32 = 0
+var roiNum uint32 = 0
+
 func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
 	triangular := &pairtypes.ITriangularArbitrageTriangular{
@@ -500,6 +508,7 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		} else if stepSize == 1 {
 			point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
 			if point.Cmp(big.NewInt(0)) == 0 {
+				atomic.AddUint32(&stepZeroNum, 1)
 				return
 			}
 			param.Start = point
@@ -513,6 +522,7 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		select {
 		// 上下文超时取消后直接返回，不再执行后面的逻辑
 		case <-ctx.Done():
+			atomic.AddUint32(&cancelNum, 1)
 			return
 		default:
 		}
@@ -520,6 +530,7 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		// 查询对应步长rois
 		rois, err = getRois(s, triangular, param, ctx)
 		if err != nil {
+			atomic.AddUint32(&getRoisErrNum, 1)
 			return
 		}
 
@@ -530,6 +541,7 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 
 	// log.Info("查询rois成功", "rois", rois)
 	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
+		atomic.AddUint32(&overProfitThresholdNum, 1)
 		return
 	}
 
@@ -558,6 +570,7 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 
 	calldata, err := EncodePackedBsc(parameters)
 	if err != nil {
+		atomic.AddUint32(&encodeErrNum, 1)
 		return
 	}
 
@@ -570,9 +583,11 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 	// 上下文超时取消后直接返回，不再插入数据到结果通道
 	select {
 	case <-ctx.Done():
+		atomic.AddUint32(&cancelNum, 1)
 		return
 	default:
 		results <- ROI
+		atomic.AddUint32(&roiNum, 1)
 	}
 
 	return
@@ -855,6 +870,13 @@ Loop5:
 		default:
 		}
 	}
+	log.Warn("CallBatch统计", "stepZeroNum", stepZeroNum, "getRoisErrNum", getRoisErrNum, "overProfitThresholdNum", overProfitThresholdNum, "encodeErrNum", encodeErrNum, "cancelNum", cancelNum, "roiNum", roiNum)
+	stepZeroNum = 0
+	getRoisErrNum = 0
+	overProfitThresholdNum = 0
+	encodeErrNum = 0
+	cancelNum = 0
+	roiNum = 0
 	paircache.IsOutPairCallDeadline(blockTime, "当前批次paircall执行完成")
 
 }
