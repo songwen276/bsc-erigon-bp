@@ -160,9 +160,10 @@ func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator
 		return nil, errors.New("number must be greater than 0")
 	}
 	height := number.Int64()
+	log.Info("GetNextValidators", "height ", height)
 	nextValidatorSet, err := rpccore.Validators(&rpctypes.Context{}, &height)
 	if err != nil {
-		log.Info("pccore.Validators err:", err)
+		log.Info("GetNextValidators", "Validators err:", err)
 		return nil, err
 	}
 	nextValidators := nextValidatorSet.Validators
