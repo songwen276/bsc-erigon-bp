@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -161,6 +162,7 @@ func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator
 	height := number.Int64()
 	nextValidatorSet, err := rpccore.Validators(&rpctypes.Context{}, &height)
 	if err != nil {
+		log.Info("pccore.Validators err:", err)
 		return nil, err
 	}
 	nextValidators := nextValidatorSet.Validators
