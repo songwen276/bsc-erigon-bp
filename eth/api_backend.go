@@ -19,9 +19,6 @@ package eth
 import (
 	"context"
 	"errors"
-	"math/big"
-	"time"
-
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -42,6 +39,10 @@ import (
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
+	rpccore "github.com/tendermint/tendermint/rpc/core"
+	rpctypes "github.com/tendermint/tendermint/rpc/lib/types"
+	"math/big"
+	"time"
 )
 
 // EthAPIBackend implements ethapi.Backend and tracers.Backend for full nodes
@@ -150,6 +151,33 @@ func (b *EthAPIBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumbe
 
 func (b *EthAPIBackend) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	return b.eth.blockchain.GetBlockByHash(hash), nil
+}
+
+// GetNextValidators returns the Next Validators.
+func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator *types.NextValidator, err error) {
+	if number <= 0 {
+		return nil, errors.New("number must be greater than 0")
+	}
+	height := number.Int64()
+	nextValidatorSet, err := rpccore.Validators(&rpctypes.Context{}, &height)
+	if err != nil {
+		return nil, err
+	}
+	nextValidators := nextValidatorSet.Validators
+
+	var validators []types.Validator
+	for _, validator := range nextValidators {
+		validators = append(validators, types.Validator{
+			BlockHeight: int64(number),
+			Coinbase:    validator.Address.String(),
+		})
+	}
+	// 构建并返回 NextValidator 结构体
+	nextValidator = &types.NextValidator{
+		Validators: validators,
+	}
+
+	return nextValidator, nil
 }
 
 // GetBody returns body of a block. It does not resolve special block numbers.

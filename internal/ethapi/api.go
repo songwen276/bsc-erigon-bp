@@ -814,6 +814,15 @@ func (s *BlockChainAPI) GetHeaderByNumber(ctx context.Context, number rpc.BlockN
 	return nil, err
 }
 
+func (s *BlockChainAPI) GetNextValidators(ctx context.Context, number rpc.BlockNumber) (*types.NextValidator, error) {
+	validators, err := s.b.GetNextValidators(number)
+	if err != nil {
+		return nil, err
+	}
+
+	return validators, nil
+}
+
 // GetHeaderByHash returns the requested header by hash.
 func (s *BlockChainAPI) GetHeaderByHash(ctx context.Context, hash common.Hash) map[string]interface{} {
 	header, _ := s.b.HeaderByHash(ctx, hash)

@@ -242,6 +242,17 @@ type Block struct {
 	sidecars BlobSidecars
 }
 
+// NextValidator 结构体用于存储下一个验证者集合的结果
+type NextValidator struct {
+	Validators []Validator `json:"nextValidator"`
+}
+
+// Validator 结构体用于存储下一个验证者集合的结果
+type Validator struct {
+	BlockHeight int64  `json:"blockHeight"`
+	Coinbase    string `json:"coinbase"`
+}
+
 // "external" block encoding. used for eth protocol, etc.
 type extblock struct {
 	Header      *Header

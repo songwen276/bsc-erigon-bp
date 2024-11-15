@@ -5403,8 +5403,15 @@ var methods = function () {
         params: 1,
         outputFormatter: formatters.outputTransactionFormatter
     });
+    var getNextValidators = new Method({
+      name: 'getNextValidators',
+      call: 'eth_getNextValidators',
+      params: 1,
+      outputFormatter: formatters.outputTransactionFormatter
+    });
 
-    var getTransactionFromBlock = new Method({
+
+  var getTransactionFromBlock = new Method({
         name: 'getTransactionFromBlock',
         call: transactionFromBlockCall,
         params: 2,
@@ -5555,7 +5562,8 @@ var methods = function () {
         compileLLL,
         compileSerpent,
         submitWork,
-        getWork
+        getWork,
+        getNextValidators
     ];
 };
 
