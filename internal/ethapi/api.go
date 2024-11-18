@@ -815,6 +815,7 @@ func (s *BlockChainAPI) GetHeaderByNumber(ctx context.Context, number rpc.BlockN
 }
 
 func (s *BlockChainAPI) GetNextValidators(ctx context.Context, number rpc.BlockNumber) (*types.NextValidator, error) {
+	log.Info("GetNextValidators", "number:", number.Int64())
 	validators, err := s.b.GetNextValidators(number)
 	if err != nil {
 		return nil, err
