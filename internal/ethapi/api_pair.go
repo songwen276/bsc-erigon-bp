@@ -531,6 +531,9 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 		rois, err = getRois(s, triangular, param, ctx)
 		if err != nil {
 			atomic.AddUint32(&getRoisErrNum, 1)
+			if getRoisErrNum == 1 || getRoisErrNum == 100 || getRoisErrNum == 200 {
+				log.Info("getRoisErr", "err", err)
+			}
 			return
 		}
 
