@@ -203,16 +203,16 @@ func SubmitTestCall(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, r
 	})
 }
 
-func SubmitCall(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
+func SubmitCallAndReturn(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	pairpool.Submit(func() {
 		pairWorker(ctx, s, results, triangle)
 	})
 }
 
-func SubmitCallAndReturn(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
+func SubmitRetryCallAndReturn(ctx context.Context, wg *sync.WaitGroup, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
 	pairpool.Submit(func() {
 		wg.Done()
-		pairWorker(ctx, s, results, triangle)
+		retryPairWorker(ctx, s, results, triangle)
 	})
 }
 
@@ -596,6 +596,115 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 	return
 }
 
+func retryPairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{}, triangle pairtypes.Triangle) {
+	// 设置上下文，用于控制每个任务方法执行超时时间，构造triangular
+	triangular := &pairtypes.ITriangularArbitrageTriangular{
+		Token0:  common.HexToAddress(triangle.Token0),
+		Router0: common.HexToAddress(triangle.Router0),
+		Pair0:   common.HexToAddress(triangle.Pair0),
+		Token1:  common.HexToAddress(triangle.Token1),
+		Router1: common.HexToAddress(triangle.Router1),
+		Pair1:   common.HexToAddress(triangle.Pair1),
+		Token2:  common.HexToAddress(triangle.Token2),
+		Router2: common.HexToAddress(triangle.Router2),
+		Pair2:   common.HexToAddress(triangle.Pair2),
+	}
+
+	// 初始化参数
+	var (
+		param *ArbitrageQueryParam
+		index int
+		rois  []*big.Int
+		err   error
+	)
+
+	// 根据步长循环查询rois
+	stepSizes := [5]int{10000, 1000, 100, 10, 1}
+	for _, stepSize := range stepSizes {
+		// 构造步长参数
+		if stepSize == 10000 {
+			param = getArbitrageQueryParam(big.NewInt(0), 0, 10000)
+		} else if stepSize == 1 {
+			point := new(big.Int).Add(param.Start, big.NewInt(int64(index)))
+			if point.Cmp(big.NewInt(0)) == 0 {
+				return
+			}
+			param.Start = point
+			param.End = point
+			param.Pieces = big.NewInt(1)
+		} else {
+			param = getArbitrageQueryParam(param.Start, index, stepSize)
+		}
+
+		// 由于getRois相对较耗时，使用 select 来控制任务执行时间，每次执行都检查任务是否超时
+		select {
+		// 上下文超时取消后直接返回，不再执行后面的逻辑
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// 查询对应步长rois
+		rois, err = getRois(s, triangular, param, ctx)
+		if err != nil {
+			return
+		}
+
+		if stepSize != 1 {
+			index = resolveROI(rois)
+		}
+	}
+
+	// log.Info("查询rois成功", "rois", rois)
+	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
+		return
+	}
+
+	snapshotsHash := solsha3.SoliditySHA3(solsha3.Int256(rois[3]), solsha3.Int256(rois[4]), solsha3.Int256(rois[5]))
+	subHex := hex.EncodeToString(snapshotsHash)[0:2]
+
+	parameters := []interface{}{
+		hex.EncodeToString(solsha3.Uint32(big.NewInt(0))),
+		subHex,
+		common.BigToAddress(rois[0]),
+		getWei(rois[6], 96),
+		common.BigToAddress(rois[1]),
+		getWei(rois[7], 96),
+		common.BigToAddress(rois[2]),
+		getWei(rois[10], 96),
+		triangular.Token0,
+		getWei(rois[11], 96),
+		triangular.Pair0,
+		getWei(rois[12], 96),
+		triangular.Token1,
+		getWei(rois[13], 96),
+		triangular.Pair1,
+		triangular.Token2,
+		triangular.Pair2,
+	}
+
+	calldata, err := EncodePackedBsc(parameters)
+	if err != nil {
+		return
+	}
+
+	ROI := &ROI{
+		Triangle: triangle,
+		CallData: calldata,
+		Profit:   *rois[13],
+	}
+
+	// 上下文超时取消后直接返回，不再插入数据到结果通道
+	select {
+	case <-ctx.Done():
+		return
+	default:
+		results <- ROI
+	}
+
+	return
+}
+
 func (s *BlockChainAPI) CallBatch() (string, error) {
 	// 读取任务测试数据
 	log.Info("开始执行CallBatch")
@@ -843,7 +952,7 @@ Loop2:
 				break Loop3
 			default:
 				wg.Add(1)
-				SubmitCallAndReturn(ctx, &wg, s, results, retryTriangle)
+				SubmitRetryCallAndReturn(ctx, &wg, s, results, retryTriangle)
 			}
 		}
 		wg.Wait()
@@ -859,7 +968,7 @@ Loop4:
 			// 超时后停止提交任务
 			break Loop4
 		default:
-			SubmitCall(ctx, s, results, triangle)
+			SubmitCallAndReturn(ctx, s, results, triangle)
 		}
 	}
 
