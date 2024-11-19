@@ -158,8 +158,7 @@ func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator
 		return nil, errors.New("number must be greater than 0")
 	}
 	height := number.Int64()
-	log.Info("GetNextValidators", "number ", number)
-
+	log.Info("GetNextValidators", "number:", number.Int64())
 	currentNumber := b.eth.BlockChain().CurrentBlock().Number
 	log.Info("GetNextValidators", "currentNumber", currentNumber)
 
