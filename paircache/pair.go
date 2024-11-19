@@ -319,9 +319,9 @@ func IsOutPairCallDeadline(blockTime *time.Time, desc string) bool {
 
 func SelectRandomElements(slice []pairtypes.Triangle, count int) []pairtypes.Triangle {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	selected := make([]pairtypes.Triangle, count)
-	for i := 0; i < count; i++ {
-		selected[i] = slice[r.Intn(len(slice))]
+	for i := len(slice) - 1; i > len(slice)-1-count; i-- {
+		j := r.Intn(i + 1)                      // 随机选择范围逐渐缩小
+		slice[i], slice[j] = slice[j], slice[i] // 每次随机选择一个元素，并将其与最后一个元素
 	}
-	return selected
+	return slice[len(slice)-count:]
 }
