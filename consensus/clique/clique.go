@@ -516,6 +516,11 @@ func (c *Clique) NextInTurnValidator(chain consensus.ChainHeaderReader, header *
 	return common.Address{}, errors.New("not implemented")
 }
 
+// NextNextInTurnValidator return the next and next in-turn validator for header
+func (c *Clique) NextNextInTurnValidator(chain consensus.ChainHeaderReader, header *types.Header) (common.Address, error) {
+	return common.Address{}, errors.New("not implemented")
+}
+
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {

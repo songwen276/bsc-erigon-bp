@@ -411,6 +411,14 @@ func (s *Snapshot) inturnValidator() common.Address {
 	return validators[offset]
 }
 
+// nextNextValidator returns the validator for the block height after the next block.
+func (s *Snapshot) nextNextValidator() common.Address {
+	validators := s.validators()
+	// Calculate offset for the block after the next one
+	offset := (s.Number + 2) / uint64(s.TurnLength) % uint64(len(validators))
+	return validators[offset]
+}
+
 func (s *Snapshot) enoughDistance(validator common.Address, header *types.Header) bool {
 	idx := s.indexOfVal(validator)
 	if idx < 0 {
