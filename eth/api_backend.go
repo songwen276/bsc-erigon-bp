@@ -40,8 +40,6 @@ import (
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
-	rpccore "github.com/tendermint/tendermint/rpc/core"
-	rpctypes "github.com/tendermint/tendermint/rpc/lib/types"
 	"math/big"
 	"time"
 )
@@ -161,18 +159,23 @@ func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator
 	}
 	height := number.Int64()
 	log.Info("GetNextValidators", "height ", height)
-	nextValidatorSet, err := rpccore.Validators(&rpctypes.Context{}, &height)
-	if err != nil {
-		log.Info("GetNextValidators", "Validators err:", err)
-		return nil, err
-	}
-	nextValidators := nextValidatorSet.Validators
-
+	currentBlockNumer := b.CurrentBlock().Number
 	var validators []types.Validator
-	for _, validator := range nextValidators {
+
+	nextCoinbase, err := b.Chain().Engine().NextInTurnValidator(b.Chain(), b.eth.BlockChain().CurrentHeader())
+	log.Info("GetNextValidators", "nextCoinbase ", nextCoinbase)
+	if err == nil {
 		validators = append(validators, types.Validator{
-			BlockHeight: int64(number),
-			Coinbase:    validator.Address.String(),
+			BlockHeight: currentBlockNumer.Int64() + 1,
+			Coinbase:    nextCoinbase.Hex(),
+		})
+	}
+	nextNextCoinbase, nerr := b.Chain().Engine().NextNextInTurnValidator(b.Chain(), b.eth.BlockChain().CurrentHeader())
+	log.Info("GetNextValidators", "nextNextCoinbase ", nextNextCoinbase)
+	if nerr == nil {
+		validators = append(validators, types.Validator{
+			BlockHeight: currentBlockNumer.Int64() + 2,
+			Coinbase:    nextNextCoinbase.Hex(),
 		})
 	}
 	// 构建并返回 NextValidator 结构体
