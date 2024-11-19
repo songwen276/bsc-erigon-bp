@@ -159,14 +159,19 @@ func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator
 	}
 	height := number.Int64()
 	log.Info("GetNextValidators", "height ", height)
-	currentBlockNumer := b.CurrentBlock().Number
+
 	var validators []types.Validator
 
-	nextCoinbase, err := b.Chain().Engine().NextInTurnValidator(b.Chain(), b.eth.BlockChain().CurrentHeader())
+	header := b.eth.BlockChain().GetHeaderByNumber(uint64(height))
+	if header == nil {
+		log.Error("GetNextValidators", "block header not found")
+		return nil, errors.New("header for block not found")
+	}
+	nextCoinbase, err := b.Chain().Engine().NextInTurnValidator(b.Chain(), header)
 	log.Info("GetNextValidators", "nextCoinbase ", nextCoinbase)
 	if err == nil {
 		validators = append(validators, types.Validator{
-			BlockHeight: currentBlockNumer.Int64() + 1,
+			BlockHeight: height + 1,
 			Coinbase:    nextCoinbase.Hex(),
 		})
 	}
@@ -174,7 +179,7 @@ func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator
 	log.Info("GetNextValidators", "nextNextCoinbase ", nextNextCoinbase)
 	if nerr == nil {
 		validators = append(validators, types.Validator{
-			BlockHeight: currentBlockNumer.Int64() + 2,
+			BlockHeight: height + 2,
 			Coinbase:    nextNextCoinbase.Hex(),
 		})
 	}
