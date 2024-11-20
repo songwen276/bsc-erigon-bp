@@ -165,15 +165,17 @@ func (b *EthAPIBackend) GetBlockAndNextValidators(ctx context.Context, number rp
 		log.Error("GetNextValidators", "err", err)
 		return nil, err
 	}
+	log.Info("GetNextValidators", "block:", bo.Number())
 	n, err2 := b.GetNextValidators(number)
 	if err2 != nil {
 		log.Error("GetNextValidators", "err2", err2)
 		return nil, err2
 	}
 	blockWithNextValidator := &types.BlockWithNextValidator{
-		Block:         bo,
-		NextValidator: n,
+		Block:         *bo,
+		NextValidator: *n,
 	}
+	log.Info("GetNextValidators", "out:", blockWithNextValidator)
 	return blockWithNextValidator, nil
 }
 

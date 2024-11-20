@@ -248,8 +248,8 @@ type NextValidator struct {
 }
 
 type BlockWithNextValidator struct {
-	Block         *Block
-	NextValidator *NextValidator
+	Block         Block
+	NextValidator NextValidator
 }
 
 // Validator 结构体用于存储下一个验证者集合的结果
