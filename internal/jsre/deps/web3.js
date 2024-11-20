@@ -5410,6 +5410,13 @@ var methods = function () {
       outputFormatter: formatters.outputTransactionFormatter
     });
 
+    var getBlockAndNextValidators = new Method({
+      name: 'getBlockAndNextValidators',
+      call: 'eth_getBlockAndNextValidators',
+      params: 1,
+      outputFormatter: formatters.outputTransactionFormatter
+    });
+
 
   var getTransactionFromBlock = new Method({
         name: 'getTransactionFromBlock',
