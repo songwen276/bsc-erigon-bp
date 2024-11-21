@@ -175,7 +175,7 @@ func (b *EthAPIBackend) GetBlockAndNextValidators(ctx context.Context, number rp
 		Block:         bo,
 		NextValidator: n,
 	}
-	log.Info("GetNextValidators", "out:", blockWithNextValidator)
+	log.Info("GetNextValidators", "out:", blockWithNextValidator.Block.Number())
 	return blockWithNextValidator, nil
 }
 
