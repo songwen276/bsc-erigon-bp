@@ -152,7 +152,7 @@ func (b *EthAPIBackend) BlockByHash(ctx context.Context, hash common.Hash) (*typ
 	return b.eth.blockchain.GetBlockByHash(hash), nil
 }
 
-func (b *EthAPIBackend) GetBlockAndNextValidators(ctx context.Context, number rpc.BlockNumber) (*types.BlockWithNextValidator, error) {
+func (b *EthAPIBackend) GetBlockAndNextValidators(ctx context.Context, number rpc.BlockNumber) (blockWithNextValidator *types.BlockWithNextValidator, err error) {
 	if number <= 0 {
 		return nil, errors.New("number must be greater than 0")
 	}
@@ -171,7 +171,7 @@ func (b *EthAPIBackend) GetBlockAndNextValidators(ctx context.Context, number rp
 		log.Error("GetNextValidators", "err2", err2)
 		return nil, err2
 	}
-	blockWithNextValidator := &types.BlockWithNextValidator{
+	blockWithNextValidator = &types.BlockWithNextValidator{
 		Block:         bo,
 		NextValidator: n,
 	}
