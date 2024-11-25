@@ -152,6 +152,33 @@ func (b *EthAPIBackend) BlockByHash(ctx context.Context, hash common.Hash) (*typ
 	return b.eth.blockchain.GetBlockByHash(hash), nil
 }
 
+func (b *EthAPIBackend) GetBlockAndNextValidators(ctx context.Context, number rpc.BlockNumber) (blockWithNextValidator *types.BlockWithNextValidator, err error) {
+	if number <= 0 {
+		return nil, errors.New("number must be greater than 0")
+	}
+	log.Info("GetNextValidators", "number:", number.Int64())
+	currentNumber := b.eth.BlockChain().CurrentBlock().Number
+	log.Info("GetNextValidators", "currentNumber", currentNumber)
+
+	bo, err := b.BlockByNumber(ctx, number)
+	if err != nil {
+		log.Error("GetNextValidators", "err", err)
+		return nil, err
+	}
+	log.Info("GetNextValidators", "block:", bo.Number())
+	n, err2 := b.GetNextValidators(number)
+	if err2 != nil {
+		log.Error("GetNextValidators", "err2", err2)
+		return nil, err2
+	}
+	blockWithNextValidator = &types.BlockWithNextValidator{
+		Block:         bo,
+		NextValidator: n,
+	}
+	log.Info("GetNextValidators", "out:", blockWithNextValidator.Block.Number())
+	return blockWithNextValidator, nil
+}
+
 // GetNextValidators returns the Next Validators.
 func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator *types.NextValidator, err error) {
 	if number <= 0 {

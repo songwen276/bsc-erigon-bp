@@ -823,6 +823,14 @@ func (s *BlockChainAPI) GetNextValidators(ctx context.Context, number rpc.BlockN
 	return validators, nil
 }
 
+func (s *BlockChainAPI) GetBlockAndNextValidators(ctx context.Context, number rpc.BlockNumber) (*types.BlockWithNextValidator, error) {
+	v, err := s.b.GetBlockAndNextValidators(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 // GetHeaderByHash returns the requested header by hash.
 func (s *BlockChainAPI) GetHeaderByHash(ctx context.Context, hash common.Hash) map[string]interface{} {
 	header, _ := s.b.HeaderByHash(ctx, hash)
