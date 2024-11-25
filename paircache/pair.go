@@ -39,6 +39,7 @@ var (
 	PairCallSwitch    bool
 	ProfitThreshold   int64
 	EsGasLimit        uint64
+	OpenCache         bool
 )
 
 // 处理通道中的数据

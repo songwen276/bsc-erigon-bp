@@ -280,6 +280,7 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 	paircache.ChainId = cfg.Pair.ChainId
 	paircache.Type = cfg.Pair.Type
 	paircache.EsGasLimit = cfg.Pair.EsGasLimit
+	paircache.OpenCache = cfg.Pair.OpenCache
 	paircache.InitPairCache()
 
 	git, _ := version.VCS()

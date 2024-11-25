@@ -30,6 +30,8 @@ type Config struct {
 	Type string `toml:"type"`
 
 	EsGasLimit uint64 `toml:"esgaslimit"`
+
+	OpenCache bool `toml:"open-cache"`
 }
 
 var DefaultConfig = Config{
