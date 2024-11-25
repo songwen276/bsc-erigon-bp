@@ -223,7 +223,9 @@ func FlagDoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrH
 	if state == nil || err != nil {
 		return nil, err
 	}
-	state.Flag = 1
+	if paircache.OpenCache {
+		state.Flag = 1
+	}
 
 	return doCall(ctx, b, args, state, header, overrides, blockOverrides, timeout, globalGasCap)
 }
