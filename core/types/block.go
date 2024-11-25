@@ -244,7 +244,8 @@ type Block struct {
 
 // NextValidator 结构体用于存储下一个验证者集合的结果
 type NextValidator struct {
-	Validators []Validator `json:"nextValidator"`
+	Validators         []Validator `json:"nextValidator"`
+	CurrentBlockNumber int64       `json:"currentBlockNumber"`
 }
 
 type BlockWithNextValidator struct {
