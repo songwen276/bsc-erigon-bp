@@ -6,6 +6,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/log"
+	pairconfig "github.com/ethereum/go-ethereum/paircache/config"
 	"github.com/ethereum/go-ethereum/paircache/mysqldb"
 	"github.com/ethereum/go-ethereum/paircache/pairtypes"
 	"github.com/jmoiron/sqlx"
@@ -33,7 +34,7 @@ var (
 	ChainId           int64
 	Type              string
 	MevServiceUrl     string
-	TrianglefilterNum int
+	TriangleFilterNum int
 	PairCallTimeout   int
 	PairCallDeadline  int64
 	PairCallSwitch    bool
@@ -186,9 +187,8 @@ func fetchDynamicConfig() {
 		// log.Info("刷新内存中pairCallSwitch成功", "pairCallSwitch", PairCallSwitch)
 	}
 
-	if triangleCount, ok := result["triangleCount"].(float64); ok {
-		TrianglefilterNum = int(triangleCount)
-		// log.Info("刷新内存中TrianglefilterNum成功", "trianglefilterNum", TrianglefilterNum)
+	if localConfig, err := pairconfig.LoadConfig("dynamic-config.yaml"); err == nil {
+		TriangleFilterNum = localConfig.TriangleFilterNum
 	}
 
 	if threadTtl, ok := result["threadTtl"].(float64); ok {

@@ -474,7 +474,7 @@ func workerTest(ctx context.Context, s *BlockChainAPI, results chan interface{},
 
 var stepZeroNum uint32 = 0
 var getRoisErrNum uint32 = 0
-var overProfitThresholdNum uint32 = 0
+var lowerProfitThresholdNum uint32 = 0
 var encodeErrNum uint32 = 0
 var cancelNum uint32 = 0
 var roiNum uint32 = 0
@@ -546,7 +546,7 @@ func pairWorker(ctx context.Context, s *BlockChainAPI, results chan interface{},
 
 	// log.Info("查询rois成功", "rois", rois)
 	if rois == nil || rois[13] == nil || rois[13].Cmp(big.NewInt(paircache.ProfitThreshold)) < 0 {
-		atomic.AddUint32(&overProfitThresholdNum, 1)
+		atomic.AddUint32(&lowerProfitThresholdNum, 1)
 		return
 	}
 
@@ -984,10 +984,10 @@ Loop5:
 		default:
 		}
 	}
-	log.Warn("CallBatch统计", "stepZeroNum", stepZeroNum, "getRoisErrNum", getRoisErrNum, "overProfitThresholdNum", overProfitThresholdNum, "encodeErrNum", encodeErrNum, "cancelNum", cancelNum, "roiNum", roiNum)
+	log.Warn("CallBatch统计", "stepZeroNum", stepZeroNum, "getRoisErrNum", getRoisErrNum, "lowerProfitThresholdNum", lowerProfitThresholdNum, "encodeErrNum", encodeErrNum, "cancelNum", cancelNum, "roiNum", roiNum)
 	stepZeroNum = 0
 	getRoisErrNum = 0
-	overProfitThresholdNum = 0
+	lowerProfitThresholdNum = 0
 	encodeErrNum = 0
 	cancelNum = 0
 	roiNum = 0

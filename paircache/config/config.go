@@ -1,5 +1,10 @@
 package pairconfig
 
+import (
+	"gopkg.in/yaml.v3"
+	"os"
+)
+
 type Config struct {
 	MysqlUser string `toml:"mysql-user"`
 
@@ -40,4 +45,28 @@ var DefaultConfig = Config{
 	MysqlConnMaxLifetime: 3600,
 	ClusterId:            1,
 	ClusterTotal:         1,
+}
+
+type LocalConfig struct {
+	TriangleFilterNum int `yaml:"triangleFilterNum"`
+}
+
+func LoadConfig(file string) (*LocalConfig, error) {
+	// 打开文件
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	// 创建 Config 实例
+	var cfg LocalConfig
+
+	// 使用 YAML 解码
+	decoder := yaml.NewDecoder(f)
+	if err = decoder.Decode(&cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
 }
