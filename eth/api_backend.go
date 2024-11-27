@@ -156,26 +156,26 @@ func (b *EthAPIBackend) GetBlockAndNextValidators(ctx context.Context, number rp
 	if number <= 0 {
 		return nil, errors.New("number must be greater than 0")
 	}
-	log.Info("GetNextValidators", "number:", number.Int64())
+	log.Info("GetBlockAndNextValidators", "number:", number.Int64())
 	currentNumber := b.eth.BlockChain().CurrentBlock().Number
-	log.Info("GetNextValidators", "currentNumber", currentNumber)
+	log.Info("GetBlockAndNextValidators", "currentNumber", currentNumber)
 
 	bo, err := b.BlockByNumber(ctx, number)
 	if err != nil {
-		log.Error("GetNextValidators", "err", err)
+		log.Error("GetBlockAndNextValidators", "err", err)
 		return nil, err
 	}
-	log.Info("GetNextValidators", "block:", bo.Number())
+	log.Info("GetBlockAndNextValidators", "block:", bo.Number())
 	n, err2 := b.GetNextValidators(number)
 	if err2 != nil {
-		log.Error("GetNextValidators", "err2", err2)
+		log.Error("GetBlockAndNextValidators", "err2", err2)
 		return nil, err2
 	}
 	blockWithNextValidator = &types.BlockWithNextValidator{
 		Block:         bo,
 		NextValidator: n,
 	}
-	log.Info("GetNextValidators", "out:", blockWithNextValidator.Block.Number())
+	log.Info("GetBlockAndNextValidators", "out:", blockWithNextValidator.Block.Number())
 	return blockWithNextValidator, nil
 }
 
@@ -214,7 +214,8 @@ func (b *EthAPIBackend) GetNextValidators(number rpc.BlockNumber) (nextValidator
 	}
 	// 构建并返回 NextValidator 结构体
 	nextValidator = &types.NextValidator{
-		Validators: validators,
+		Validators:         validators,
+		CurrentBlockNumber: currentNumber.Int64(),
 	}
 
 	return nextValidator, nil
