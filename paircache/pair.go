@@ -187,7 +187,7 @@ func fetchDynamicConfig() {
 		// log.Info("刷新内存中pairCallSwitch成功", "pairCallSwitch", PairCallSwitch)
 	}
 
-	if localConfig, err := pairconfig.LoadConfig("dynamic-config.yaml"); err == nil {
+	if localConfig, err := pairconfig.LoadConfig("/bc/dynamic-config.yaml"); err == nil {
 		TriangleFilterNum = localConfig.TriangleFilterNum
 	}
 
