@@ -1844,7 +1844,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 				}
 				storageFastCache.Set(cacheKey, content)
 				if i == 1 {
-					log.Info("storageFastCache", "addrHash", addrHash, "key", key, "value", content)
+					log.Info("storageFastCache", "addrHash", addrHash, "key", key, "value", common.BytesToHash(content))
 					i++
 				}
 			}
