@@ -206,76 +206,6 @@ func (s *stateObject) setOriginStorage(key common.Hash, value common.Hash) {
 	s.originStorage[key] = value
 }
 
-var storageCacheMap = NewStorageCacheMap()
-
-type storageCache struct {
-	lock     sync.RWMutex
-	cacheMap map[common.Hash]map[common.Hash]common.Hash
-}
-
-// NewStorageCacheMap 初始化一个空的 storageCacheMap
-func NewStorageCacheMap() *storageCache {
-	return &storageCache{
-		cacheMap: make(map[common.Hash]map[common.Hash]common.Hash),
-	}
-}
-
-// Get 获取指定地址和槽位的值
-func (s *storageCache) Get(addr common.Hash, slot common.Hash) (common.Hash, bool) {
-	s.lock.RLock()         // 加读锁
-	defer s.lock.RUnlock() // 函数结束释放读锁
-
-	if slotMap, exists := s.cacheMap[addr]; exists {
-		value, found := slotMap[slot]
-		return value, found
-	}
-	return common.Hash{}, false
-}
-
-func (s *storageCache) GetSlotMap(addr common.Hash) (map[common.Hash]common.Hash, bool) {
-	s.lock.RLock()         // 加读锁
-	defer s.lock.RUnlock() // 函数结束释放读锁
-
-	if slotMap, exists := s.cacheMap[addr]; exists {
-		return slotMap, true
-	}
-	return nil, false
-}
-
-// Set 设置指定地址和槽位的值
-func (s *storageCache) Set(addr common.Hash, slot common.Hash, value common.Hash) {
-	s.lock.Lock()         // 加写锁
-	defer s.lock.Unlock() // 函数结束释放写锁
-
-	// 如果地址不存在，则创建新的槽位映射
-	if _, exists := s.cacheMap[addr]; !exists {
-		s.cacheMap[addr] = make(map[common.Hash]common.Hash)
-	}
-	s.cacheMap[addr][slot] = value
-}
-
-// Delete 删除指定地址和槽位的值
-func (s *storageCache) Delete(addr common.Hash, slot common.Hash) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if slotMap, exists := s.cacheMap[addr]; exists {
-		delete(slotMap, slot)
-		if len(slotMap) == 0 { // 如果地址的槽位为空，删除地址映射
-			delete(s.cacheMap, addr)
-		}
-	}
-}
-
-// Delete 删除指定地址的所有槽位
-func (s *storageCache) DeleteAll(addr common.Hash) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	// 删除整个地址映射，清除该地址下的所有槽位
-	delete(s.cacheMap, addr)
-}
-
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	// If we have a pending write or clean cached, return that
@@ -305,10 +235,17 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	)
 
 	storageKey := crypto.Keccak256Hash(key.Bytes())
+	cacheKey := append(s.addrHash[:], storageKey[:]...)
 	if s.db.Flag == 1 {
-		if storageValue, exists := storageCacheMap.Get(s.addrHash, storageKey); exists {
-			s.setOriginStorage(key, storageValue)
-			return storageValue
+		// if storageValue, exists := storageCacheMap.Get(s.addrHash, storageKey); exists {
+		// 	s.setOriginStorage(key, storageValue)
+		// 	return storageValue
+		// }
+
+		if cacheValue, found := storageFastCache.HasGet(nil, cacheKey); found {
+			value.SetBytes(cacheValue)
+			s.setOriginStorage(key, value)
+			return value
 		}
 	}
 
@@ -348,7 +285,8 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	s.setOriginStorage(key, value)
 
 	if s.db.Flag == 1 {
-		storageCacheMap.Set(s.addrHash, storageKey, value)
+		// storageCacheMap.Set(s.addrHash, storageKey, value)
+		storageFastCache.Set(cacheKey, value.Bytes())
 	}
 
 	return value
@@ -554,7 +492,6 @@ func (s *stateObject) commit() (*trienode.NodeSet, error) {
 	// The trie is currently in an open state and could potentially contain
 	// cached mutations. Call commit to acquire a set of nodes that have been
 	// modified, the set can be nil if nothing to commit.
-	// stateObject中的trie是由账户的storage生成的树
 	root, nodes, err := s.trie.Commit(false)
 	if err != nil {
 		return nil, err

@@ -1787,7 +1787,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 	// 删除已销毁账户数据缓存与storage数据缓存
 	for addr, _ := range s.stateObjectsDestruct {
-		storageCacheMap.DeleteAll(crypto.Keccak256Hash(addr[:]))
+		// storageCacheMap.DeleteAll(crypto.Keccak256Hash(addr[:]))
 		stateObjCacheMap.Remove(addr.Hex())
 	}
 
@@ -1824,19 +1824,25 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 	// 更新账户的storage数据缓存
 	for addrHash, storage := range s.storages {
-		if _, exists := storageCacheMap.GetSlotMap(addrHash); exists {
-			for khash, encoded := range storage {
-				var value common.Hash
-				if len(encoded) > 0 {
-					_, content, _, _ := rlp.Split(encoded)
-					value.SetBytes(content)
-				}
-				storageCacheMap.Set(addrHash, khash, value)
+		// if _, exists := storageCacheMap.GetSlotMap(addrHash); exists {
+		// 	for khash, encoded := range storage {
+		// 		var value common.Hash
+		// 		if len(encoded) > 0 {
+		// 			_, content, _, _ := rlp.Split(encoded)
+		// 			value.SetBytes(content)
+		// 		}
+		// 		storageCacheMap.Set(addrHash, khash, value)
+		// 	}
+		// }
 
-				// if i == 1 {
-				// 	log.Info("原来的storageCache", "addr", addr.Hex(), "storage.key", hash, "storage.value", value)
-				// 	i++
-				// }
+		for key, value := range storage {
+			cacheKey := append(addrHash[:], key[:]...)
+			if found := storageFastCache.Has(cacheKey); found {
+				var content []byte
+				if len(value) > 0 {
+					_, content, _, _ = rlp.Split(value)
+				}
+				storageFastCache.Set(cacheKey, content)
 			}
 		}
 	}
