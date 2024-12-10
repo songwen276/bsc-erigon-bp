@@ -92,4 +92,5 @@ func (s *storageCache) DeleteAll(addr common.Hash) {
 	delete(s.cacheMap, addr)
 }
 
+var record int = 0
 var storageFastCache = fastcache.New(10 * 1024 * 1024 * 1024) // 10GB cache

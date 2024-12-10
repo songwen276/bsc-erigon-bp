@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"io"
 	"sync"
 	"time"
@@ -245,6 +246,10 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		if cacheValue, found := storageFastCache.HasGet(nil, cacheKey); found {
 			value.SetBytes(cacheValue)
 			s.setOriginStorage(key, value)
+			if record < 20 {
+				log.Info("storage cache hit", "addrHash", s.addrHash, "key", key, "value", value)
+				record++
+			}
 			return value
 		}
 	}

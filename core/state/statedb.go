@@ -1792,7 +1792,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	}
 
 	// 更新账户信息及合约code
-	// i := 1
+	i := 1
 	for addr := range s.stateObjectsDirty {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			// 新区块产生后更新stateObjCacheMap
@@ -1843,6 +1843,10 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 					_, content, _, _ = rlp.Split(value)
 				}
 				storageFastCache.Set(cacheKey, content)
+				if i == 1 {
+					log.Info("storageFastCache", "addrHash", addrHash, "key", key, "value", content)
+					i++
+				}
 			}
 		}
 	}
