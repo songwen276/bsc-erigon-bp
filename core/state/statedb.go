@@ -1858,10 +1858,12 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 					}
 				}
 			}
+
 		}
 	}
 
 	// 更新账户的storage数据缓存
+	n := 1
 	for addrHash, storage := range s.storages {
 		for key, value := range storage {
 			cacheKey := append(addrHash[:], key[:]...)
@@ -1871,9 +1873,9 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 					_, content, _, _ = rlp.Split(value)
 				}
 				storageFastCache.Set(cacheKey, content)
-				if i == 1 {
+				if n == 1 {
 					log.Info("storageFastCache", "addrHash", addrHash, "key", key, "value", common.BytesToHash(content))
-					i++
+					n++
 				}
 			}
 		}

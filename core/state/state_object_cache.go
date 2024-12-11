@@ -21,4 +21,6 @@ import (
 )
 
 var storageHits int = 0
-var storageFastCache = fastcache.New(6 * 1024 * 1024 * 1024) // 10GB cache
+var codeHits int = 0
+var codeSizeHits int = 0
+var storageFastCache = fastcache.New(8 * 1024 * 1024 * 1024) // 10GB cache

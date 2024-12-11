@@ -581,6 +581,10 @@ func (s *stateObject) Code() []byte {
 			code := make([]byte, len(cacheCode))
 			copy(code, cacheCode)
 			s.code = code
+			if codeHits < 20 {
+				log.Info("code cache hit", "addr", s.address.Hex())
+				codeHits++
+			}
 			return code
 		}
 	}
@@ -611,10 +615,30 @@ func (s *stateObject) CodeSize() int {
 	if bytes.Equal(s.CodeHash(), types.EmptyCodeHash.Bytes()) {
 		return 0
 	}
+
+	if s.db.Flag == 1 {
+		if cacheCode, found := stateObjCodeFastCache.HasGet(nil, s.address[:]); found {
+			if codeSizeHits < 20 {
+				log.Info("codeSize cache hit", "addr", s.address.Hex())
+				codeSizeHits++
+			}
+			return len(cacheCode)
+		}
+	}
+
 	size, err := s.db.db.ContractCodeSize(s.address, common.BytesToHash(s.CodeHash()))
 	if err != nil {
 		s.db.setError(fmt.Errorf("can't load code size %x: %v", s.CodeHash(), err))
 	}
+
+	if s.db.Flag == 1 {
+		// 缓存code
+		code, _ := s.db.db.ContractCode(s.address, common.BytesToHash(s.CodeHash()))
+		cacheCode := make([]byte, len(code))
+		copy(cacheCode, code)
+		stateObjCodeFastCache.Set(s.address[:], cacheCode)
+	}
+
 	return size
 }
 

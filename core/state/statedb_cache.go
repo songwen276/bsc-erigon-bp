@@ -8,5 +8,5 @@ import (
 var stateObjCacheMap = cmap.New()
 
 var stateObjHits int = 0
-var stateObjFastCache = fastcache.New(3 * 1024 * 1024 * 1024)
-var stateObjCodeFastCache = fastcache.New(6 * 1024 * 1024 * 1024)
+var stateObjFastCache = fastcache.New(1 * 1024 * 1024 * 1024)
+var stateObjCodeFastCache = fastcache.New(1 * 1024 * 1024 * 1024)
