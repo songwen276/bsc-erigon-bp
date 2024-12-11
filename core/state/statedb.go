@@ -20,7 +20,6 @@ package state
 import (
 	"errors"
 	"fmt"
-	cmap "github.com/orcaman/concurrent-map"
 	"runtime"
 	"sort"
 	"sync"
@@ -710,8 +709,6 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	return nil
 }
 
-var stateObjCacheMap = cmap.New()
-
 // getDeletedStateObject is similar to getStateObject, but instead of returning
 // nil for a deleted state object, it returns the actual object with the deleted
 // flag set. This is needed by the state journal to revert to the correct s-
@@ -722,22 +719,37 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		return obj
 	}
 
+	// If no live objects are available, attempt to use snapshots
+	var data *types.StateAccount
+
 	// StateDB自己本身无缓存时，在从公共的缓存中获取，如果存在则将其复制成新的实例更新到StateDB中
 	// 复制实例主要是避免线程安全问题，不同线程不同的StateDB操作各自不同的stateObject，可以将stateObjectCacheMap理解成另一个数据库
 	if s.Flag == 1 {
-		if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
-			objCache := objectCache.(*stateObject)
-			object := newObject(s, addr, objCache.origin.Copy())
-			copyCode := make([]byte, len(objCache.code))
-			copy(copyCode, objCache.code)
-			object.code = copyCode
-			s.setStateObject(object)
-			return object
+		// if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
+		// 	objCache := objectCache.(*stateObject)
+		// 	object := newObject(s, addr, objCache.origin.Copy())
+		// 	copyCode := make([]byte, len(objCache.code))
+		// 	copy(copyCode, objCache.code)
+		// 	object.code = copyCode
+		// 	s.setStateObject(object)
+		// 	return object
+		// }
+
+		if cacheValue, found := stateObjFastCache.HasGet(nil, addr[:]); found {
+			if len(cacheValue) == 0 { // can be both nil and []byte{}
+				return nil
+			}
+			data, _ = types.FullAccount(cacheValue)
+			obj := newObject(s, addr, data)
+			s.setStateObject(obj)
+			if stateObjHits < 20 {
+				log.Info("stateObj cache hit", "addr", addr.Hex(), "nonce", data.Nonce, "balance", data.Balance.String(), "root", data.Root.Hex())
+				stateObjHits++
+			}
+			return obj
 		}
 	}
 
-	// If no live objects are available, attempt to use snapshots
-	var data *types.StateAccount
 	if s.snap != nil {
 		start := time.Now()
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
@@ -792,12 +804,15 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	s.setStateObject(obj)
 
 	if s.Flag == 1 {
-		objectCache := newObject(nil, addr, data.Copy())
-		code := obj.Code()
-		copyCode := make([]byte, len(code))
-		copy(copyCode, code)
-		objectCache.code = copyCode
-		stateObjCacheMap.Set(addr.Hex(), objectCache)
+		// objectCache := newObject(nil, addr, data.Copy())
+		// code := obj.Code()
+		// copyCode := make([]byte, len(code))
+		// copy(copyCode, code)
+		// objectCache.code = copyCode
+		// stateObjCacheMap.Set(addr.Hex(), objectCache)
+
+		slimAcc := types.SlimAccountRLP(*data.Copy())
+		stateObjFastCache.Set(addr[:], slimAcc)
 	}
 
 	return obj
@@ -1793,48 +1808,61 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 	// 更新账户信息及合约code
 	i := 1
+	j := 1
 	for addr := range s.stateObjectsDirty {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			// 新区块产生后更新stateObjCacheMap
-			var objCache *stateObject
-			if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
-				objCache = objectCache.(*stateObject)
-				// if i == 1 {
-				// 	log.Info("原来的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
-				// }
-				// 由前面的obj.commit()方法可知，账户在当前区块有更新，解析区块后，该账户会生成s.trie，无更新则s.trie == nil，因此，
-				// 当s.trie == nil，直接将obj.data.Copy()赋值给objCache.origin，否则，将s.trie提交计算出账户状态更改后的状态
-				// root更新到obj.data.Root，再将obj.data.Copy()赋值给objCache.origin，其实在这里obj.data已经等于obj.origin
-				objCache.origin = obj.data.Copy()
-			}
+			// var objCache *stateObject
+			// if objectCache, exists := stateObjCacheMap.Get(addr.Hex()); exists {
+			// objCache = objectCache.(*stateObject)
+			// if i == 1 {
+			// 	log.Info("原来的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
+			// }
+			// 由前面的obj.commit()方法可知，账户在当前区块有更新，解析区块后，该账户会生成s.trie，无更新则s.trie == nil，因此，
+			// 当s.trie == nil，直接将obj.data.Copy()赋值给objCache.origin，否则，将s.trie提交计算出账户状态更改后的状态
+			// root更新到obj.data.Root，再将obj.data.Copy()赋值给objCache.origin，其实在这里obj.data已经等于obj.origin
+			// objCache.origin = obj.data.Copy()
+			// }
 			// if i == 1 && objCache != nil {
 			// 	log.Info("更新的stateObjCache", "objCache.origin.Root", objCache.origin.Root, "objCache.origin.Nonce", objCache.origin.Nonce, "objCache.origin.Balance", *objCache.origin.Balance, "objCache.origin.CodeHash", hexutils.BytesToHex(objCache.origin.CodeHash))
 			// 	i++
 			// }
 
 			// obj.cacheCode是在前面合约code持久化到数据库后才标记为待更新缓存
-			if obj.code != nil && obj.cacheCode && objCache != nil {
-				// 更新缓存code
-				copyCode := make([]byte, len(obj.code))
-				copy(copyCode, obj.code)
-				objCache.code = copyCode
+			// if obj.code != nil && obj.cacheCode && objCache != nil {
+			// 	// 更新缓存code
+			// 	copyCode := make([]byte, len(obj.code))
+			// 	copy(copyCode, obj.code)
+			// 	objCache.code = copyCode
+			// }
+
+			if found := stateObjFastCache.Has(addr[:]); found {
+				// 缓存中存在该账户信息，直接更新缓存
+				slimAcc := types.SlimAccountRLP(*obj.data.Copy())
+				stateObjFastCache.Set(addr[:], slimAcc)
+				if i == 1 {
+					log.Info("stateObjFastCache", "addr", addr.Hex(), "nonce", obj.data.Nonce, "balance", obj.data.Balance.String(), "root", obj.data.Root.Hex())
+					i++
+				}
+			}
+
+			if obj.code != nil && obj.cacheCode {
+				if found := stateObjCodeFastCache.Has(addr[:]); found {
+					// 更新缓存code
+					updateCode := make([]byte, len(obj.code))
+					copy(updateCode, obj.code)
+					stateObjCodeFastCache.Set(addr[:], updateCode)
+					if j == 1 {
+						log.Info("stateObjCodeFastCache", "addr", addr.Hex(), "code", obj.code.String())
+						j++
+					}
+				}
 			}
 		}
 	}
 
 	// 更新账户的storage数据缓存
 	for addrHash, storage := range s.storages {
-		// if _, exists := storageCacheMap.GetSlotMap(addrHash); exists {
-		// 	for khash, encoded := range storage {
-		// 		var value common.Hash
-		// 		if len(encoded) > 0 {
-		// 			_, content, _, _ := rlp.Split(encoded)
-		// 			value.SetBytes(content)
-		// 		}
-		// 		storageCacheMap.Set(addrHash, khash, value)
-		// 	}
-		// }
-
 		for key, value := range storage {
 			cacheKey := append(addrHash[:], key[:]...)
 			if found := storageFastCache.Has(cacheKey); found {

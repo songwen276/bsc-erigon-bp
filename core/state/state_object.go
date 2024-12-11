@@ -238,17 +238,12 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	storageKey := crypto.Keccak256Hash(key.Bytes())
 	cacheKey := append(s.addrHash[:], storageKey[:]...)
 	if s.db.Flag == 1 {
-		// if storageValue, exists := storageCacheMap.Get(s.addrHash, storageKey); exists {
-		// 	s.setOriginStorage(key, storageValue)
-		// 	return storageValue
-		// }
-
 		if cacheValue, found := storageFastCache.HasGet(nil, cacheKey); found {
 			value.SetBytes(cacheValue)
 			s.setOriginStorage(key, value)
-			if record < 20 {
-				log.Info("storage cache hit", "addrHash", s.addrHash, "key", key, "value", value)
-				record++
+			if storageHits < 20 {
+				log.Info("storage cache hit", "addr", s.address.Hex(), "key", key, "value", value)
+				storageHits++
 			}
 			return value
 		}
@@ -290,7 +285,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	s.setOriginStorage(key, value)
 
 	if s.db.Flag == 1 {
-		// storageCacheMap.Set(s.addrHash, storageKey, value)
 		storageFastCache.Set(cacheKey, value.Bytes())
 	}
 
@@ -581,11 +575,29 @@ func (s *stateObject) Code() []byte {
 	if bytes.Equal(s.CodeHash(), types.EmptyCodeHash.Bytes()) {
 		return nil
 	}
+
+	if s.db.Flag == 1 {
+		if cacheCode, found := stateObjCodeFastCache.HasGet(nil, s.address[:]); found {
+			code := make([]byte, len(cacheCode))
+			copy(code, cacheCode)
+			s.code = code
+			return code
+		}
+	}
+
 	code, err := s.db.db.ContractCode(s.address, common.BytesToHash(s.CodeHash()))
 	if err != nil {
 		s.db.setError(fmt.Errorf("can't load code hash %x: %v", s.CodeHash(), err))
 	}
 	s.code = code
+
+	if s.db.Flag == 1 {
+		// 缓存code
+		cacheCode := make([]byte, len(code))
+		copy(cacheCode, code)
+		stateObjCodeFastCache.Set(s.address[:], cacheCode)
+	}
+
 	return code
 }
 
